@@ -1,0 +1,20 @@
+[project]
+name = "fepoc"
+version = "0.0.1"
+description = "Exact-likelihood world model vs RSSM-VAE free-energy agent PoC"
+requires-python = ">=3.10"
+dependencies = [
+  "torch>=2.4",
+  "numpy",
+  "scipy",
+  "matplotlib",
+  "pyyaml",
+  "gymnasium==1.4.0",
+  "minigrid==3.2.0",
+]
+
+[tool.setuptools]
+packages = ["fepoc"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

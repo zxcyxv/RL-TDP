@@ -1,0 +1,180 @@
+"""실험 2d: 월드 모델 + 상상 속 actor-critic, 온라인 학습. 설계: docs/exp2d_design.md
+
+python -m fepoc.agent.run --model m1s --beta 0 --env_steps 50000 --seed 0
+python -m fepoc.agent.run --model m1s --beta 0 --env_steps 3000 --tag smoke     # 시간 측정
+"""
+import argparse
+import json
+import time
+from collections import deque
+from pathlib import Path
+
+import numpy as np
+import torch
+
+from ..env.collect_dynobs import ENV_ID, n_balls_visible
+from minigrid.core.constants import OBJECT_TO_IDX
+
+from ..env.memory import FAILURE, N_ACTIONS, PROGRESS, SUCCESS, MemoryEnv
+
+FREE = (OBJECT_TO_IDX["empty"], OBJECT_TO_IDX["goal"])
+
+
+def front_blocked(grid):
+    """자기중심 시야에서 바로 앞 칸 (3, 5)가 벽·공 등으로 막혔는가. 충돌 판정과 정확히 같다."""
+    return int(grid[3, 5, 0]) not in FREE
+from ..wm.common import grid_onehot
+from ..wm.models import build
+from .ac import ActorCritic, ActorCriticKL
+from .dv3 import DreamerV3AC
+
+
+class Buffer:
+    """GPU에 미리 잡아 둔 재현 버퍼. 에피소드 단위로 넣고, 실험 2a와 같은 방식으로 조각을 뽑는다."""
+
+    def __init__(self, capacity, device):
+        self.dev, self.cap, self.n = device, capacity, 0
+        self.grid = torch.zeros(capacity, 7, 7, 3, dtype=torch.uint8, device=device)
+        z = lambda: torch.zeros(capacity, dtype=torch.long, device=device)
+        self.dir, self.outcome, self.action, self.segment = z(), z(), z(), z()
+        self.starts, self.lens = [], []
+        self._ep = None
+
+    def add(self, ep):
+        L = len(ep["dir"])
+        if self.n + L > self.cap:
+            raise RuntimeError("버퍼 용량 초과")
+        sl = slice(self.n, self.n + L)
+        self.grid[sl] = torch.as_tensor(np.stack(ep["grid"]), device=self.dev)
+        for k in ("dir", "outcome", "action", "segment"):
+            getattr(self, k)[sl] = torch.as_tensor(np.asarray(ep[k]), device=self.dev)
+        self.starts.append(self.n); self.lens.append(L); self.n += L
+        self._ep = None
+
+    def sample(self, B, L, gen):
+        if self._ep is None:
+            self._ep = (torch.tensor(self.starts, device=self.dev), torch.tensor(self.lens, device=self.dev))
+        ep_start, ep_len = self._ep
+        ep = torch.randint(len(ep_len), (B,), device=self.dev, generator=gen)
+        n = ep_len[ep]
+        off = (torch.rand(B, device=self.dev, generator=gen) * ((n - L).clamp_min(0) + 1)).long()
+        lens = torch.minimum(n - off, torch.full_like(n, L))
+        ar = torch.arange(L, device=self.dev)
+        idx = (ep_start[ep] + off)[:, None] + torch.minimum(ar[None], (lens - 1)[:, None])
+        return dict(grid=self.grid[idx].long(), dir=self.dir[idx], outcome=self.outcome[idx],
+                    action=self.action[idx], segment=self.segment[idx], mask=ar[None] < lens[:, None])
+
+
+@torch.no_grad()
+def run_episode(env, seed, wm, ac, dev, random_policy=False, rng=None, ent_log=None):
+    o = env.reset(seed)
+    h = torch.zeros(1, 256, device=dev)
+    ep = dict(grid=[], dir=[], outcome=[], action=[], segment=[])
+    done = False
+    while True:
+        ep["grid"].append(o["grid"]); ep["dir"].append(o["dir"]); ep["outcome"].append(o["outcome"])
+        ep["segment"].append(min(n_balls_visible(o["grid"]), 2))
+        if done:
+            ep["action"].append(0)
+            ep["truncated"] = o["outcome"] == PROGRESS
+            return ep
+        g = torch.as_tensor(o["grid"], device=dev).long()[None]
+        d = torch.tensor([o["dir"]], device=dev)
+        e = wm.sk.embed(grid_onehot(g), d)
+        if random_policy:
+            a = int(rng.integers(N_ACTIONS))
+        else:
+            pol = ac.policy(torch.cat([h, e], -1))
+            a = int(pol.sample().item())
+            if ent_log is not None:
+                ent_log[front_blocked(o["grid"])].append(pol.entropy().item())
+        h = wm.sk.step(h, e, torch.tensor([a], device=dev))
+        ep["action"].append(a)
+        o, _, done = env.step(a)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--model", choices=["m0fs", "m0sq", "m1s"], required=True)
+    ap.add_argument("--beta", type=float, default=0.0, help="IG 계수")
+    ap.add_argument("--ent", type=float, default=3e-4, help="정책 엔트로피 계수 = 1/γ_π (nats)")
+    ap.add_argument("--actor", choices=["reinforce", "kl", "dv3"], default="kl")
+    ap.add_argument("--env_steps", type=int, default=50_000)
+    ap.add_argument("--prefill_eps", type=int, default=100)
+    ap.add_argument("--train_every", type=int, default=2)
+    ap.add_argument("--starts", type=int, default=256)
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--out", default="runs/exp2d")
+    ap.add_argument("--tag", default="")
+    args = ap.parse_args()
+
+    dev = "cuda"
+    torch.manual_seed(args.seed)
+    rng = np.random.default_rng(args.seed)
+    gen = torch.Generator(device=dev).manual_seed(args.seed)
+    env = MemoryEnv(ENV_ID, truncation_as_failure=False)
+    wm = build(args.model).to(dev)
+    opt = torch.optim.Adam(wm.parameters(), lr=3e-4)
+    if args.actor == "dv3":
+        ac = DreamerV3AC().to(dev)
+    elif args.actor == "kl":
+        ac = ActorCriticKL(ent=args.ent).to(dev)
+    else:
+        ac = ActorCritic(beta=args.beta, ent=args.ent).to(dev)
+    buf = Buffer(args.env_steps + 50_000, dev)
+    name = f"{args.model}_{args.actor}_b{args.beta:g}_e{args.ent:g}_s{args.seed}" + (f"_{args.tag}" if args.tag else "")
+    out = Path(args.out) / name; out.mkdir(parents=True, exist_ok=True)
+
+    env_seed = 10_000_000 * (args.seed + 1)
+    for _ in range(args.prefill_eps):
+        buf.add(run_episode(env, env_seed, wm, ac, dev, random_policy=True, rng=rng)); env_seed += 1
+    print(f"{name}: 버퍼 시작 {buf.n} 스텝", flush=True)
+
+    log, recent = [], deque(maxlen=50)
+    ent_log = {0: deque(maxlen=2000), 1: deque(maxlen=2000)}     # 앞이 빈 상태 / 막힌 상태
+    steps, updates, t0, t_upd = 0, 0, time.time(), 0.0
+    while steps < args.env_steps:
+        ep = run_episode(env, env_seed, wm, ac, dev, ent_log=ent_log); env_seed += 1
+        trunc = ep.pop("truncated")
+        buf.add(ep)
+        L = len(ep["dir"]) - 1
+        steps += L
+        recent.append((ep["outcome"][-1] == SUCCESS, L, ep["outcome"][-1] == FAILURE, trunc))
+        # 환경 train_every 스텝마다 갱신 1회 (에피소드가 끝날 때 몰아서)
+        for _ in range(max(1, L // args.train_every)):
+            ts = time.time()
+            batch = buf.sample(32, 32, gen)
+            loss, _ = wm.loss(batch)
+            opt.zero_grad(set_to_none=True); loss.backward()
+            torch.nn.utils.clip_grad_norm_(wm.parameters(), 100); opt.step()
+            with torch.no_grad():
+                h, e_all = wm.sk.rollout(grid_onehot(batch["grid"]), batch["dir"], batch["action"])
+            if args.actor == "dv3":
+                diag = ac.update(wm, h, e_all, batch)
+                updates += 1; t_upd += time.time() - ts
+                continue
+            ok = batch["mask"] & (batch["outcome"] == PROGRESS)
+            idx = ok.nonzero()
+            idx = idx[torch.randperm(len(idx), device=dev, generator=gen)[:args.starts]]
+            b, t = idx[:, 0], idx[:, 1]
+            diag = ac.update(wm, h[b, t], batch["grid"][b, t], batch["dir"][b, t])
+            updates += 1; t_upd += time.time() - ts
+        if len(log) == 0 or steps // 1000 > log[-1]["steps"] // 1000:
+            sr = float(np.mean([r[0] for r in recent])); ln = float(np.mean([r[1] for r in recent]))
+            rec = dict(steps=steps, updates=updates, episodes=env_seed - 10_000_000 * (args.seed + 1),
+                       success=sr, collision=float(np.mean([r[2] for r in recent])),
+                       truncated=float(np.mean([r[3] for r in recent])), ep_len=ln,
+                       ent_free=float(np.mean(ent_log[0])) if ent_log[0] else float("nan"),
+                       ent_blocked=float(np.mean(ent_log[1])) if ent_log[1] else float("nan"),
+                       wm_loss=loss.item(), **diag,
+                       sec=time.time() - t0, ms_per_update=1000 * t_upd / max(1, updates))
+            log.append(rec)
+            print(json.dumps({k: (round(v, 4) if isinstance(v, float) else v) for k, v in rec.items()}), flush=True)
+            (out / "log.json").write_text(json.dumps(log))
+    torch.save(dict(wm=wm.state_dict(), ac=ac.state_dict()), out / "final.pt")
+    (out / "log.json").write_text(json.dumps(log))
+    print(f"완료: {steps} 스텝, 갱신 {updates}, {time.time() - t0:.0f}s", flush=True)
+
+
+if __name__ == "__main__":
+    main()
