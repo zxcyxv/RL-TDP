@@ -2,6 +2,7 @@
 
 python -m fepoc.agent.run --model m1s --beta 0 --env_steps 50000 --seed 0
 python -m fepoc.agent.run --model m1s --beta 0 --env_steps 3000 --tag smoke     # 시간 측정
+python -m fepoc.agent.run --model m0sq --actor efe --beta 1 --env_steps 15000    # 실험 2f (docs/exp2f_design.md)
 """
 import argparse
 import json
@@ -27,6 +28,7 @@ from ..wm.common import grid_onehot
 from ..wm.models import build
 from .ac import ActorCritic, ActorCriticKL
 from .dv3 import DreamerV3AC
+from .efe import ActorCriticEFE
 
 
 class Buffer:
@@ -96,9 +98,16 @@ def run_episode(env, seed, wm, ac, dev, random_policy=False, rng=None, ent_log=N
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", choices=["m0fs", "m0sq", "m1s"], required=True)
-    ap.add_argument("--beta", type=float, default=0.0, help="IG 계수")
+    ap.add_argument("--beta", type=float, default=0.0, help="IG 계수 (efe: novelty 계수, 0이면 novelty 모듈 없음)")
     ap.add_argument("--ent", type=float, default=3e-4, help="정책 엔트로피 계수 = 1/γ_π (nats)")
-    ap.add_argument("--actor", choices=["reinforce", "kl", "dv3"], default="kl")
+    ap.add_argument("--actor", choices=["reinforce", "kl", "dv3", "efe"], default="kl")
+    ap.add_argument("--pref", default="0,1,-1", help="efe: 결과(진행, 성공, 실패)의 상대 로그 선호 c. C = softmax(c/λ_C)")
+    ap.add_argument("--lam_c", type=float, default=1.0, help="efe: 선호 정밀도의 역수 λ_C")
+    ap.add_argument("--nov_k", type=int, default=5, help="efe: novelty 앙상블 크기 K")
+    ap.add_argument("--nov_mode", choices=["joint", "cellsum"], default="joint",
+                    help="efe: joint = 결합 정보량 불편 추정 / cellsum = 칸별 JSD 합 (상한)")
+    ap.add_argument("--nov_samples", type=int, default=1, help="efe: joint 추정의 멤버당 샘플 수")
+    ap.add_argument("--device", default="cuda")
     ap.add_argument("--env_steps", type=int, default=50_000)
     ap.add_argument("--prefill_eps", type=int, default=100)
     ap.add_argument("--train_every", type=int, default=2)
@@ -108,7 +117,7 @@ def main():
     ap.add_argument("--tag", default="")
     args = ap.parse_args()
 
-    dev = "cuda"
+    dev = args.device
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
     gen = torch.Generator(device=dev).manual_seed(args.seed)
@@ -119,10 +128,17 @@ def main():
         ac = DreamerV3AC().to(dev)
     elif args.actor == "kl":
         ac = ActorCriticKL(ent=args.ent).to(dev)
+    elif args.actor == "efe":
+        ac = ActorCriticEFE(ent=args.ent, beta=args.beta, pref=tuple(float(v) for v in args.pref.split(",")),
+                            lam_c=args.lam_c, nov_k=args.nov_k, nov_mode=args.nov_mode,
+                            nov_samples=args.nov_samples).to(dev)
     else:
         ac = ActorCritic(beta=args.beta, ent=args.ent).to(dev)
     buf = Buffer(args.env_steps + 50_000, dev)
-    name = f"{args.model}_{args.actor}_b{args.beta:g}_e{args.ent:g}_s{args.seed}" + (f"_{args.tag}" if args.tag else "")
+    name = f"{args.model}_{args.actor}_b{args.beta:g}_e{args.ent:g}_s{args.seed}"
+    if args.actor == "efe":
+        name += f"_lc{args.lam_c:g}" + (f"_{args.nov_mode}" if args.beta else "")
+    name += f"_{args.tag}" if args.tag else ""
     out = Path(args.out) / name; out.mkdir(parents=True, exist_ok=True)
 
     env_seed = 10_000_000 * (args.seed + 1)
@@ -149,6 +165,7 @@ def main():
             torch.nn.utils.clip_grad_norm_(wm.parameters(), 100); opt.step()
             with torch.no_grad():
                 h, e_all = wm.sk.rollout(grid_onehot(batch["grid"]), batch["dir"], batch["action"])
+            nov_loss = ac.novelty.train_step(batch) if getattr(ac, "novelty", None) is not None else None
             if args.actor == "dv3":
                 diag = ac.update(wm, h, e_all, batch)
                 updates += 1; t_upd += time.time() - ts
@@ -158,6 +175,8 @@ def main():
             idx = idx[torch.randperm(len(idx), device=dev, generator=gen)[:args.starts]]
             b, t = idx[:, 0], idx[:, 1]
             diag = ac.update(wm, h[b, t], batch["grid"][b, t], batch["dir"][b, t])
+            if nov_loss is not None:
+                diag["nov_loss"] = nov_loss
             updates += 1; t_upd += time.time() - ts
         if len(log) == 0 or steps // 1000 > log[-1]["steps"] // 1000:
             sr = float(np.mean([r[0] for r in recent])); ln = float(np.mean([r[1] for r in recent]))
