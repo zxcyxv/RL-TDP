@@ -26,25 +26,34 @@ def evaluate(model, data, L=32, S_list=(100, 1000), ks=(1, 5, 10), chunk_batch=6
     model.eval()
     t0 = time.time()
     starts, lens = data.chunks(L)
-    if max_chunks:
-        starts, lens = starts[:max_chunks], lens[:max_chunks]
+    if max_chunks and max_chunks < len(starts):    # 고르게 뽑는다 (보류 집합은 무작위 정책 에피소드가 앞에 몰려 있다)
+        sel = torch.linspace(0, len(starts) - 1, max_chunks, device=starts.device).round().long().unique()
+        starts, lens = starts[sel], lens[sel]
     S_max = max(S_list)
     rec = {k: [] for k in ["F", "seg", "lw_extra", "ess"] + [f"ll{S}" for S in S_list]}
     acc = {(k, m): [] for k in ks for m in ("sample", "mode", "copy")}
     is_m0 = model.name == "M0"
     exact = getattr(model, "exact", False)          # M0F: 우도가 정확하므로 중요도 가중이 필요 없다
     uses_ctx = getattr(model, "uses_ctx", False)    # -S 모델: 디코더가 직전 시야 문맥을 받는다
+    tokens = getattr(model, "tokens", False)        # TDP 기억 (fepoc/wm/tdp.py): 상태가 토큰 [52, d] + 흔적
+    chunk_batch = getattr(model, "eval_chunk_batch", chunk_batch)
     for b0 in range(0, len(starts), chunk_batch):
         batch = data.batch_from(starts[b0:b0 + chunk_batch], lens[b0:b0 + chunk_batch], L)
         x = grid_onehot(batch["grid"])
-        h, e = model.sk.rollout(x, batch["dir"], batch["action"])
+        if tokens:
+            h, full = model.sk.rollout(x, batch["dir"], batch["outcome"], batch["action"], keep_state=True)
+            e = h                                    # 쓰지 않는 자리 (M1 계열만 e를 쓴다)
+        else:
+            h, e = model.sk.rollout(x, batch["dir"], batch["action"])
         m = batch["mask"]
         hv, ev = h[m], e[m]
         gv, dv, ov = batch["grid"][m], batch["dir"][m], batch["outcome"][m]
         ctx = prev_context(x, batch["dir"], batch["action"]) if uses_ctx else None
         cv = ctx_select(ctx, m) if uses_ctx else None
         flow_ctx = uses_ctx and getattr(model, "flow_model", False)     # M0-S
-        if (uses_ctx and exact) or flow_ctx:
+        if tokens:
+            F_t = model.step_terms(hv, gv, dv, ov)["F"]
+        elif (uses_ctx and exact) or flow_ctx:
             F_t = model.step_terms(hv, cv, gv, dv, ov)["F"]
         elif uses_ctx:
             F_t = model.step_terms(hv, ev, cv, gv, dv, ov)["F"]
@@ -59,7 +68,9 @@ def evaluate(model, data, L=32, S_list=(100, 1000), ks=(1, 5, 10), chunk_batch=6
             rec["ess"].append(torch.ones_like(F_t))
         for f0 in range(0, 0 if exact else len(hv), frame_block):
             sl = slice(f0, f0 + frame_block)
-            if is_m0:
+            if tokens:
+                lw, extra = model.loglik_is(hv[sl], gv[sl], dv[sl], ov[sl], S_max)
+            elif is_m0:
                 lw, extra = model.loglik_is(hv[sl], gv[sl], dv[sl], ov[sl], S_max)
             elif flow_ctx:
                 lw, extra = model.loglik_is(hv[sl], ctx_select(cv, sl), gv[sl], dv[sl], ov[sl], S_max)
@@ -84,7 +95,10 @@ def evaluate(model, data, L=32, S_list=(100, 1000), ks=(1, 5, 10), chunk_batch=6
             tgt = batch["grid"].gather(1, tt.clamp(max=L - 1)[..., None, None, None].expand(-1, -1, 7, 7, 3))
             acc[(k, "copy")].append((prev == tgt).all(-1).float().mean((-1, -2))[ok])
         for mode in ("sample", "mode"):
-            hc = dict(h=h.reshape(B * L, -1), **ctx_flat(ctx)) if uses_ctx else h.reshape(B * L, -1)
+            if tokens:
+                hc = model.flat_state(full)
+            else:
+                hc = dict(h=h.reshape(B * L, -1), **ctx_flat(ctx)) if uses_ctx else h.reshape(B * L, -1)
             for j in range(max(ks)):
                 tgt_t = (ar[None] + j).expand(B, L)                     # 예측 대상 시점 t0 + j
                 ok = (tgt_t < batch["mask"].sum(1, keepdim=True)) & m

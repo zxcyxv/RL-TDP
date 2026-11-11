@@ -466,6 +466,9 @@ class CondFlowSkipLearnedQWM(CondFlowSkipWM):
 
 
 def build(name, **kw):
+    if name in ("m0sqt", "m0sqt0"):                   # GRU 대신 TDP 기억 (fepoc/wm/tdp.py), t0 = 시냅스 M 없음
+        from .tdp import CondFlowTDPWM
+        return CondFlowTDPWM(synapse=(name == "m0sqt"), **kw)
     return {"m0": CondFlowWM, "m0f": FactorizedWM, "m1": RSSMWM,
             "m0fs": FactorizedSkipWM, "m1s": RSSMSkipWM, "m0s": CondFlowSkipWM,
             "m0sq": CondFlowSkipLearnedQWM}[name](**kw)

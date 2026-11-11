@@ -38,7 +38,7 @@ def save_checkpoint(model, opt, gen, update, out, min_free_gb):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", choices=["m0", "m0f", "m1", "m0fs", "m1s", "m0s", "m0sq"], required=True)
+    ap.add_argument("--model", choices=["m0", "m0f", "m1", "m0fs", "m1s", "m0s", "m0sq", "m0sqt", "m0sqt0"], required=True)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--updates", type=int, default=50_000)
     ap.add_argument("--batch", type=int, default=32)
@@ -51,13 +51,17 @@ def main():
     ap.add_argument("--out", default="runs/exp2a")
     ap.add_argument("--min_free_gb", type=float, default=2.0, help="디스크 여유가 이보다 적으면 스냅숏을 건너뛴다")
     ap.add_argument("--smoke", action="store_true", help="학습 시간만 재고 평가 1회 시간을 잰다")
+    ap.add_argument("--device", default="cuda")
+    ap.add_argument("--eval_chunks", type=int, default=0, help="평가에 쓸 보류 조각 수 (0 = 전부). CPU에서 줄여 쓴다")
+    ap.add_argument("--eval_S", type=int, nargs="+", default=[100, 1000], help="중요도 가중 샘플 수")
     args = ap.parse_args()
 
-    dev = "cuda"
+    dev = args.device
+    sync = torch.cuda.synchronize if dev.startswith("cuda") else (lambda: None)
     torch.manual_seed(args.seed)
     gen = torch.Generator(device=dev).manual_seed(args.seed)
     train, hold = SeqData(f"{args.data}/train.npz", dev), SeqData(f"{args.data}/holdout.npz", dev)
-    kw = dict(n_blocks=args.flow_blocks) if args.model in ("m0", "m0s", "m0sq") else {}
+    kw = dict(n_blocks=args.flow_blocks) if args.model in ("m0", "m0s", "m0sq", "m0sqt", "m0sqt0") else {}
     model = build(args.model, **kw).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     n_params = sum(p.numel() for p in model.parameters())
@@ -65,11 +69,12 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     print(f"{model.name} 파라미터 {n_params:,}", flush=True)
 
+    ev_kw = dict(S_list=tuple(args.eval_S), max_chunks=args.eval_chunks or None)
     log, evals = [], []
     warm, t_start = 20, None
     for u in range(1, args.updates + 1):
         if u == warm + 1:
-            torch.cuda.synchronize(); t_start = time.time()
+            sync(); t_start = time.time()
         loss, F_t = model.loss(train.sample(args.batch, args.seq, gen))
         opt.zero_grad(set_to_none=True)
         loss.backward()
@@ -81,24 +86,24 @@ def main():
             if not torch.isfinite(loss):
                 print("손실 발산", rec, flush=True); break
         if u % 1000 == 0:
-            torch.cuda.synchronize()
+            sync()
             print(f"update {u} loss {loss.item():.2f} gnorm {gnorm.item():.1f} "
                   f"{(time.time() - t_start) / (u - warm) * 1000:.1f} ms/update", flush=True)
         if not args.smoke and (u % args.eval_every == 0 or u == args.updates):
-            ev = evaluate(model, hold); ev["update"] = u
+            ev = evaluate(model, hold, **ev_kw); ev["update"] = u
             evals.append(ev)
-            print(json.dumps({k: ev[k] for k in ["update", "F", "I_hat_100", "I_hat_1000", "A_hat",
+            print(json.dumps({k: ev[k] for k in ["update", "F", *[f"I_hat_{S}" for S in args.eval_S], "A_hat",
                                                   "ess_frac_mean", "acc", "eval_time_s"]}), flush=True)
             save_checkpoint(model, opt, gen, u, out, args.min_free_gb)
             (out / "evals.json").write_text(json.dumps(evals, indent=1))
-    torch.cuda.synchronize()
+    sync()
     ms = (time.time() - t_start) / (u - warm) * 1000
     res = dict(model=model.name, n_params=n_params, ms_per_update=ms, updates=u, args=vars(args),
-               peak_mem_gb=torch.cuda.max_memory_allocated() / 1e9)
+               peak_mem_gb=torch.cuda.max_memory_allocated() / 1e9 if dev.startswith("cuda") else float("nan"))
     if args.smoke:
-        ev = evaluate(model, hold)
+        ev = evaluate(model, hold, **ev_kw)
         res["eval"] = ev
-        print(json.dumps({k: ev[k] for k in ["F", "I_hat_100", "I_hat_1000", "A_hat", "ess_frac_mean", "acc",
+        print(json.dumps({k: ev[k] for k in ["F", *[f"I_hat_{S}" for S in args.eval_S], "A_hat", "ess_frac_mean", "acc",
                                              "eval_time_s", "n_frames"]}), flush=True)
     (out / "train_log.json").write_text(json.dumps(log))
     (out / "summary.json").write_text(json.dumps(res, indent=1))
