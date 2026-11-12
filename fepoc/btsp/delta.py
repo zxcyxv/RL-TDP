@@ -41,7 +41,14 @@ N_TOK = N_CELL + 3
 
 
 class FastTDPBlock(TDPBlock):
-    """TDPBlock과 같고, 읽기에 빠른 가중치 W [H, Dv, Dk]를 더하며 값 v도 돌려준다."""
+    """TDPBlock과 같고, 읽기에 빠른 가중치 W [H, Dv, Dk]를 더하며 값 v도 돌려준다.
+    FFN 내부 폭은 inter로 직접 준다 (TDPBlock의 "256의 배수로 올림"은 d = 832용이라 d = 32에서는 3배로 커진다)."""
+
+    def __init__(self, d, heads, bands, periods, inter):
+        super().__init__(d, heads, bands, periods)
+        self.ffn_gate_up = nn.Linear(d, 2 * inter, bias=False)
+        self.ffn_down = nn.Linear(inter, d, bias=False)
+        nn.init.zeros_(self.ffn_down.weight)
 
     def forward(self, u, ek, ev, tables, W=None):
         B, T, _ = u.shape
@@ -67,7 +74,7 @@ class FastTDPBlock(TDPBlock):
 
 
 class Net(nn.Module):
-    def __init__(self, d=32, heads=2, bands=2, periods=(2.0, 8.0)):
+    def __init__(self, d=32, heads=2, bands=2, periods=(2.0, 8.0), inter=96):
         super().__init__()
         self.d, self.scale = d, math.sqrt(d)
         std = 1.0 / self.scale
@@ -75,7 +82,7 @@ class Net(nn.Module):
         self.cell_emb, self.pos_emb = tn(N_CH, d), tn(N_CELL, d)
         self.dir_emb, self.act_emb, self.out_emb = tn(N_DIR, d), tn(N_ACTIONS + 1, d), tn(N_OUTCOME, d)
         self.register_buffer("init_hidden", nn.init.trunc_normal_(torch.empty(d), std=1.0, a=-2, b=2))
-        self.block = FastTDPBlock(d, heads, bands, periods)
+        self.block = FastTDPBlock(d, heads, bands, periods, inter)
         ar = torch.arange(N_CELL)
         self.register_buffer("pos_row", (ar // HW).float(), persistent=False)
         self.register_buffer("pos_col", (ar % HW).float(), persistent=False)
@@ -149,7 +156,8 @@ def main():
     ap.add_argument("--gate", choices=["off", "always", "plateau"], default="plateau")
     ap.add_argument("--beta", type=float, default=1.0)
     ap.add_argument("--steps", type=int, default=10000)
-    ap.add_argument("--train_every", type=int, default=2)
+    ap.add_argument("--train_every", type=int, default=4)
+    ap.add_argument("--threads", type=int, default=4, help="병렬로 여러 실행을 돌릴 때는 1")
     ap.add_argument("--warmup", type=int, default=500)
     ap.add_argument("--batch", type=int, default=32)
     ap.add_argument("--seq", type=int, default=16)
@@ -161,7 +169,7 @@ def main():
     ap.add_argument("--out", default="runs/btsp_delta")
     args = ap.parse_args()
 
-    torch.set_num_threads(1)
+    torch.set_num_threads(args.threads)
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
     gen = torch.Generator().manual_seed(args.seed)
