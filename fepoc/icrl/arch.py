@@ -10,6 +10,7 @@
                  L_t = (1 − 1/20) L_{t−1} + (δ_긴² − δ_빠름²) / (2σ²) 가 ln(1/h)를 넘으면 (플래토) 긴 기억 ← 빠른 기억,
                  실행 길이 20에서 다시 쌓음. 결정은 경사를 받지 않고 경사는 통계를 통해서만 흐른다. 읽기 = 긴 기억
 --model fast / slow / window / cum   같은 구조에서 플래토 없이: 극점 20 / 극점 200 / 최근 200개 창 / 망각 없음
+--model tf       비교군: 문맥 창 softmax Transformer (최근 200개 전이, 2층, 상태 질의 cross-attention)
 --model gdn      비교군: Gated DeltaNet. 전이 토큰 [o_t, r_t, o_{t+1}]에서 k, v, 학습되는 게이트 α_t (감쇠), β_t (쓰기)
                  S_t = α_t S_{t−1} (I − β_t k_t k_tᵀ) + β_t v_t k_tᵀ,  v_t는 다음 관측의 기억 읽기를 입력으로 받는다 (TD 가능)
                  V̂(s) = u·S q(o(s)). 같은 목표로 끝까지 학습
@@ -165,6 +166,47 @@ class GDN(nn.Module):
         return outs, 0
 
 
+class TF(nn.Module):
+    """비교군: 문맥 창 softmax Transformer. 질의 시점 t의 문맥 = 최근 C개 전이 토큰 [o, r, o'] (+ 나이 임베딩),
+    문맥 안 전체 self-attention 2층 (pre-norm), 상태마다 관측 질의가 문맥을 cross-attention으로 읽어 V̂(s)를 낸다.
+    문맥 밖 전이는 버린다 (창). 기억 = C개 토큰, 질의당 계산 ∝ C²."""
+
+    def __init__(self, C=200, d=32, heads=2, layers=2, hidden=64):
+        super().__init__()
+        self.C = C
+        self.emb = nn.Sequential(nn.Linear(2 * M_OBS + 1, hidden), nn.GELU(), nn.Linear(hidden, d))
+        self.age = nn.Parameter(torch.zeros(C, d))
+        self.enc = nn.ModuleList(nn.TransformerEncoderLayer(d, heads, hidden, dropout=0.0, batch_first=True,
+                                                            norm_first=True) for _ in range(layers))
+        self.qry = nn.Sequential(nn.Linear(M_OBS, hidden), nn.GELU(), nn.Linear(hidden, d))
+        self.read = nn.MultiheadAttention(d, heads, batch_first=True)
+        self.norm = nn.LayerNorm(d)
+        self.out = nn.Sequential(nn.Linear(d, hidden), nn.GELU(), nn.Linear(hidden, 1))
+
+    def forward(self, task, every=20, chunk=15):
+        obs, s, R = task["obs"], task["s"], task["R"]
+        B, T = R.shape
+        ob = lambda ss: obs.gather(1, ss.unsqueeze(-1).expand(-1, -1, M_OBS))
+        X = self.emb(torch.cat([ob(s[:, :-1]), R.unsqueeze(-1), ob(s[:, 1:])], -1))       # [B, T, d]
+        X = torch.cat([X.new_zeros(B, self.C - 1, X.shape[-1]), X], 1)                    # 왼쪽 덧댐
+        valid = torch.cat([torch.zeros(self.C - 1, dtype=torch.bool), torch.ones(T, dtype=torch.bool)])
+        Q = self.qry(obs)                                                                  # [B, n, d]
+        ts = list(range(every - 1, T, every))
+        outs = []
+        for i in range(0, len(ts), chunk):
+            tt = ts[i:i + chunk]
+            seg = torch.stack([X[:, t:t + self.C] for t in tt], 1).flatten(0, 1)          # [B·G, C, d] (끝 = t)
+            pad = ~torch.stack([valid[t:t + self.C] for t in tt]).repeat(B, 1)            # [B·G, C]
+            h = seg + self.age.flip(0)                                                     # 마지막 토큰의 나이 0
+            for layer in self.enc:
+                h = layer(h, src_key_padding_mask=pad)
+            q = Q.unsqueeze(1).expand(-1, len(tt), -1, -1).flatten(0, 1)                  # [B·G, n, d]
+            r, _ = self.read(q, h, h, key_padding_mask=pad, need_weights=False)
+            v = self.out(self.norm(q + r)).squeeze(-1).view(B, len(tt), -1)
+            outs += [(t, v[:, j]) for j, t in enumerate(tt)]
+        return outs, 0
+
+
 def errors(outs, task):
     """체크포인트마다 과제별 정규화 오차 [C, B]."""
     V, ph = task["V"], task["phase"]
@@ -192,13 +234,14 @@ def evaluate(model, U, T, K, n_tasks=64, seed=777):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", choices=["plateau", "fast", "slow", "window", "cum", "gdn"], required=True)
+    ap.add_argument("--model", choices=["plateau", "fast", "slow", "window", "cum", "gdn", "tf"], required=True)
     ap.add_argument("--iters", type=int, default=600)
     ap.add_argument("--batch", type=int, default=16)
     ap.add_argument("--T", type=int, default=1200)
     ap.add_argument("--K", type=int, default=400)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--threads", type=int, default=4)
+    ap.add_argument("--eval_every", type=int, default=0, help="0이면 끝에만. 아니면 이 반복마다 과제 32개로 평가")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default="runs/icrl_arch")
     args = ap.parse_args()
@@ -206,7 +249,7 @@ def main():
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
     U = world()
-    model = GDN() if args.model == "gdn" else MemModel(args.model)
+    model = GDN() if args.model == "gdn" else TF() if args.model == "tf" else MemModel(args.model)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     out = Path(args.out); out.mkdir(parents=True, exist_ok=True)
     log, t0 = [], time.time()
@@ -219,7 +262,9 @@ def main():
         opt.zero_grad(set_to_none=True); loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); opt.step()
         if it % 50 == 0:
-            rec = dict(model=args.model, iter=it, loss=round(float(loss), 4), sec=round(time.time() - t0, 1))
+            rec = dict(model=args.model, iter=it, loss=round(float(loss.detach()), 4), sec=round(time.time() - t0, 1))
+            if args.eval_every and it % args.eval_every == 0:
+                rec["eval"] = evaluate(model, U, args.T, args.K, n_tasks=32)
             log.append(rec); print(json.dumps(rec), flush=True)
     res = dict(model=args.model, before=pre, T1200=evaluate(model, U, args.T, args.K),
                T3600=evaluate(model, U, 3 * args.T, args.K), log=log)
