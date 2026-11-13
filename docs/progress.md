@@ -4,9 +4,9 @@
 
 ### 저장소 기반
 - `pyproject.toml`: 의존성 고정 (`gymnasium==1.4.0`, `minigrid==3.2.0`). 환경: PyTorch 2.11 cu128, RTX 5090.
-- 결정 사항은 `docs/handover/02-spec.md` 맨 위 "변경 이력"에 적는다 (시드 1개 시작, 흐름 블록 4개, 2a 평가는 32스텝 조각, V2 생략).
+- 결정 사항은 `docs/fep/handover/02-spec.md` 맨 위 "변경 이력"에 적는다 (시드 1개 시작, 흐름 블록 4개, 2a 평가는 32스텝 조각, V2 생략).
 
-### 1단계 7절 이론 검증 (`tests/theory/`, `pytest tests/theory`)
+### 1단계 7절 이론 검증 (`tests/fep/theory/`, `pytest tests/fep/theory`)
 
 | ID | 결과 | 테스트 |
 |---|---|---|
@@ -28,25 +28,25 @@
 | V21, V22 | 미실시 (논문 PDF 원문 대조 필요) | |
 
 ### 실험 1: 고리 vs 가우시안 밴딧 (시드 0) ✅
-- 실행: `./scripts_exp1.sh` → `python -m fepoc.exp1.report` → `runs/exp1/report/` (report.md, 그림 E1-1, E1-2)
+- 실행: `./scripts/fep/exp1.sh` → `python -m rltdp.fep.bandit.report` → `runs/exp1/report/` (report.md, 그림 E1-1, E1-2)
 - 예비 결과(JAX) 재현: M0 P(고리) 0.493 (예비 0.48~0.50), M1-a 0.229 (0.22~0.23), M1-b(k=1) 0.371, Â_고리 0.29 (예비 0.373, 0.27)
 - 용량-반응 (M1-b): k = 1, 5, 50에서 Â_고리 0.29 → 0.12 → 0.03, P(고리) 0.371 → 0.457 → 0.487. **간극이 줄면 선택 편향도 같은 방향으로 준다.**
 - M1-a는 k와 무관하게 잠재를 쓰지 않고 고리를 가우시안 하나로 맞춘다 (Â ≈ 0, B̂ = 1.21). IWAE로도 이 해에서 빠져나오지 못했다.
 - 용량 비교: M0는 결합층 2 → 4 → 12에서 P(고리) 0.366 → 0.487 → 0.493 (B̂가 줄어서). M1은 은닉 128 → 320(파라미터 6배)에서 거의 그대로 (M1-a 0.229 → 0.229, M1-b 0.371 → 0.379).
 - 문서 완료 기준 중 "시드 5개 이상"은 변경 이력에 따라 시드 1개로 대체했다.
 
-### 실험 2 단계 0: 환경과 데이터 (`fepoc/env/`, `tests/test_memory_env.py`) ✅
+### 실험 2 단계 0: 환경과 데이터 (`rltdp/common/minigrid_env.py`, `rltdp/fep/collect.py`, `tests/common/test_memory_env.py`) ✅
 - 래퍼: 관측 = (격자 인덱스 7×7×3, 방향, 결과). 시간 초과도 실패로 둔다. 모델 입력은 `to_onehot()`으로 20×7×7.
 - 스크립트 정책: 특권 정보(맵)로 BFS. 단서 물체가 보이는 자세까지 간 뒤 success_pos로 간다. 매 스텝 재계획.
   - ε = 0: 300개 시드 성공률 100%, 길이 10~13 (문서 "10~15스텝"과 일치)
   - ε = 0.2: 성공률 98~99%, 길이 평균 15, 최대 31
 - 무작위 정책: 길이 평균 약 370, 최대 845 (문서 "평균 약 390"), 성공률 약 0.4
-- 데이터 (`data/memory/`, `python -m fepoc.env.collect`):
+- 데이터 (`data/memory/`, `python -m rltdp.fep.collect`):
   - train: 시드 0~499 스크립트(ε = 0.2) + 500~999 무작위, 관측 193,728개
   - holdout: 시드 1,000,000~ 무작위 50 + 스크립트 50, 관측 17,677개
   - 스텝마다 구간 라벨(방 x ≤ 3 / 복도 4~9 / 갈림길 x ≥ 10)을 같이 저장한다 (구간별 간극 표용)
 
-### 실험 2 단계 1: 흐름과 들어 올림 (`fepoc/models/`, `tests/test_flow_and_lift.py`) ✅
+### 실험 2 단계 1: 흐름과 들어 올림 (`rltdp/fep/flows/`, `tests/fep/test_flow_and_lift.py`) ✅
 - `argmax_lift.py`: 임계값 방식 q(v|x), 역변환 `log_q_given` (IG 계산용)
 - `flow.py`: Glow형 블록 4개 (ActNorm 항등 초기화 → LU 1×1 conv → affine coupling, 마스크 channel/checker 번갈아), 공유 조건 선형층 16채널, 기저 N(μ(h), σ(h))
 - 통과한 기준:
@@ -98,43 +98,48 @@
 ## 2026-11-10
 
 ### 실험 2f 구현 (실행 전)
-- `ActorCriticEFE` (`fepoc/agent/efe.py`) = ActorCriticKL + 명시적 선호분포 C(y) = softmax(c/λ_C) + 공통 novelty 정보 이득 (`fepoc/agent/novelty.py`). 설계: `docs/exp2f_design.md`
+- `ActorCriticEFE` (`rltdp/fep/agent/efe.py`) = ActorCriticKL + 명시적 선호분포 C(y) = softmax(c/λ_C) + 공통 novelty 정보 이득 (`rltdp/fep/agent/novelty.py`). 설계: `docs/fep/exp2f_design.md`
 - ActorCriticKL은 흡수 종료 덕분에 결과 채널 선호를 이미 상수 차이로 정확히 구현하고 있었다. 기본값·β = 0에서 두 actor는 같은 목적이고, 실질적인 차이는 novelty 항이다
 - novelty 정보 이득은 결합 MC 추정(불편, [0, ln K])이 기본. 칸별 JSD 합은 상한이다 (설계 2판 5.2절 표현 정정)
-- 테스트 34개 통과(CPU). 실행은 GPU에서 `./scripts_exp2f.sh`
+- 테스트 34개 통과(CPU). 실행은 GPU에서 `./scripts/fep/exp2f.sh`
 
 ### 실험 2g 준비: M0-SQ의 GRU 기억을 TDP 기억으로 교체 (실행 전)
-- `fepoc/wm/tdp.py`: tdp-reasoner의 band_product 블록을 환경 시간 축에 옮긴 것 (블록 한 번 = 환경 한 스텝). 토큰 52개 = 칸 49 + 방향·행동·결과. 흐름 조건과 기저 분포는 칸 토큰에서 칸별 선형으로, 방향·결과 머리는 해당 토큰에서 읽는다. 직전 시야 연결은 뺐다
+- `rltdp/fep/wm/tdp.py`: tdp-reasoner의 band_product 블록을 환경 시간 축에 옮긴 것 (블록 한 번 = 환경 한 스텝). 토큰 52개 = 칸 49 + 방향·행동·결과. 흐름 조건과 기저 분포는 칸 토큰에서 칸별 선형으로, 방향·결과 머리는 해당 토큰에서 읽는다. 직전 시야 연결은 뺐다
 - 모델: `m0sqt` (M0-SQ-T), `m0sqt0` (시냅스 M을 뺀 대조군). 학습 조각마다 흔적은 0에서 시작. 대역 주기 처음 값 (2, 8, 32, 128)
-- `fepoc/wm/train.py`: `--device`, `--eval_chunks`(보류 조각을 고르게 뽑음), `--eval_S`
-- `tests/test_tdp_memory.py`: 인과성, 시냅스 식 = 복소수 직접 계산, 대조군 = 계수 0, step = rollout, 손실·평가가 끝까지 돈다. 전체 테스트 39개 통과(CPU)
+- `rltdp/fep/wm/train.py`: `--device`, `--eval_chunks`(보류 조각을 고르게 뽑음), `--eval_S`
+- `tests/fep/test_tdp_memory.py`: 인과성, 시냅스 식 = 복소수 직접 계산, 대조군 = 계수 0, step = rollout, 손실·평가가 끝까지 돈다. 전체 테스트 39개 통과(CPU)
 - MemoryS13 데이터(`data/memory`)를 다시 수집했고 기록과 같다 (학습 193,728, 보류 17,677). 학습 실행과 시간 측정은 아직 하지 않았다
 
 ## 2026-11-12
 
 ### 연상기억 에너지로서의 F (방안 B) 이론 정리
-- `docs/memory_energy_theory.md`: 숨은 변수 "어느 기억에서 왔는가" 위의 혼합 생성 모델에서 에너지 U = −ln p(o, s), F* = U의 정확한 주변화 = −ln p(o) = 현대 홉필드 에너지. 쓰기 = 빠른 학습(비모수 베이즈 갱신), 읽기 = 추론, 배치 1. tdp-reasoner의 M은 이 혼합의 1차(고전 홉필드) 근사이자 시간 연상 기억. 구현·수치 확인 없음
+- `docs/fep/memory_energy_theory.md`: 숨은 변수 "어느 기억에서 왔는가" 위의 혼합 생성 모델에서 에너지 U = −ln p(o, s), F* = U의 정확한 주변화 = −ln p(o) = 현대 홉필드 에너지. 쓰기 = 빠른 학습(비모수 베이즈 갱신), 읽기 = 추론, 배치 1. tdp-reasoner의 M은 이 혼합의 1차(고전 홉필드) 근사이자 시간 연상 기억. 구현·수치 확인 없음
 
 ### 능동적 추론식 통합안과 TDP 가소성 강화학습 제안 (문서만)
-- `docs/aif_integration.md`: critic을 월드 모델의 "기하 수평선 미래 결과" 예측 머리로 바꾸고, 정책을 G 위의 추론(softmax)으로 두는 통합안
-- `docs/tdp_plasticity_rl.md`: 자유에너지 계열과 별개로, TDP의 키·값 흔적을 적격 흔적으로 쓰는 강화학습 제안 두 가지
+- `docs/fep/aif_integration.md`: critic을 월드 모델의 "기하 수평선 미래 결과" 예측 머리로 바꾸고, 정책을 G 위의 추론(softmax)으로 두는 통합안
+- `docs/btsp/tdp_plasticity_rl.md`: 자유에너지 계열과 별개로, TDP의 키·값 흔적을 적격 흔적으로 쓰는 강화학습 제안 두 가지
   - A. TDP-DA (3요소): 키 흔적 × 행동 표본 편차의 키 선행 쌍 = 적격 흔적, TD 오차가 장기 시냅스로 옮김. 가소 경로에 대해 정확한 액터-크리틱 + 적격 흔적(γλ = 1 − η). b = 0인 bands-EMA 기억이 곧 적격 흔적
   - B. TDP-BTSP: 키 흔적 = ET, 플래토 흔적 = IS, Milstein et al. 2021의 가중치 의존 양방향 규칙(독립적 q₊, q₋)으로 시냅스별 순간 겹침에 따라 틀을 덮어씀. 사건 근접장(목표·위험)으로 행동 선택
 
 ### PoC 마무리, M1 + TDP 기억 + BTSP 시냅스로 방향 전환 (설계만)
-- `docs/m1_tdp_btsp_design.md`: RSSM(M1)의 GRU를 TDP 기억(상시 STDP, 작업 기억)으로 바꾸고, 그 위에 플래토로 쓰는 BTSP 시냅스(일화적 장기 기록)를 둔다. 플래토는 KL[q(s) ‖ p(s)](새로움)와 보상·위험 사건에서. s를 기억에 넣어 상태 정보 이득을 식별 가능하게 한다. 진행 순서: M1-S-T(BTSP 없음) → 새로움 플래토 BTSP → 강화학습
+- `docs/btsp/m1_tdp_btsp_design.md`: RSSM(M1)의 GRU를 TDP 기억(상시 STDP, 작업 기억)으로 바꾸고, 그 위에 플래토로 쓰는 BTSP 시냅스(일화적 장기 기록)를 둔다. 플래토는 KL[q(s) ‖ p(s)](새로움)와 보상·위험 사건에서. s를 기억에 넣어 상태 정보 이득을 식별 가능하게 한다. 진행 순서: M1-S-T(BTSP 없음) → 새로움 플래토 BTSP → 강화학습
 
 ## 2026-11-13
 
-### BTSP로 구현한 DQN (`fepoc/btsp/replay.py`, `analyze_replay.py`)
+### BTSP로 구현한 DQN (`rltdp/btsp/replay.py`, `analyze_replay.py`)
 - Q-net = TDP 블록 θ (역전파) + 출력층 W (델타 규칙, 재생 중에 벨만 목표로 씀). 재현 = 에피소드 단위 해마 재생 (방금 에피소드는 역순)
 - v1 (지각 블록·목표망 없음): 델타·Adam 둘 다 실패. 델타는 φ가 거의 평행(코사인 0.79, 유효 차원 8)해서 β = 1 쓰기가 폭주 후 Q ≈ +4로 과대추정에 정착
 - v2 (TDP 앞에 같은 스텝 softmax 어텐션 + FFN 지각 블록, EMA 목표망, Double Q, 재생 일정은 그대로): 델타 1만 스텝 성공 0.94. 장 분석: Q 대 Q* 상관 0.94, 탐욕 정책이 무작위 배치 100개에서 최단 경로(6.10스텝). Adam 비교군은 사용자 요청으로 돌리지 않음
 - 결론: 기존 DQN 변형(NEC, LS-DQN, EBU 계열)을 넘는 기여가 없어 이 노선은 정리
 
-### 문맥 안 TD의 기억과 플래토 게이트 토이 연구 (`fepoc/icrl/toy.py`, `docs/icrl_memory_gate.md`)
+### 문맥 안 TD의 기억과 플래토 게이트 토이 연구 (`rltdp/icrl/toy.py`, `docs/icrl/icrl_memory_gate.md`)
 - 선형 어텐션 ICRL(Wang et al. 2025)의 계산은 문맥 전체가 아니라 LSTD 충분통계 (A, b)에만 의존. A = 같은 시각 외적 − γ·한 스텝 지연 외적 (STDP 꼴). 순환 기억 30개 실수가 창 11,000개의 바닥을 넘어 TD 고정점에 도달, 깊이는 시간에 나눌 수 있음 (iLSTD)
 - 비정상(보상 전환)에서는 망각 극점이 필요. 극점 하나 ≈ 같은 실효 길이의 창, 그러나 α를 고른 온라인 TD를 못 이김. 적응과 정확도가 다른 극점에서 나옴
 - 플래토 생 게이트는 해로움 (특이·발산, 관심 상태 오차 4~1,000배 이상 증가). 할인 속도로 감쇠하는 앞쪽 흔적(β = γ, emphatic TD의 follow-on)으로 거를 때만 관심 상태 오차 1.1~7.6배 감소
 - 실험 4 (`nonstat_gate`): 실험 3의 게이트를 비정상 흐름에. 공간 가중 그대로는 추적 지연을 못 고침. 시간 축 플래토 중 정밀도 가중 로그 우도비(문턱 = 사전 승산비 ln(1/h))로 터지고 긴 기억을 빠른 기억으로 덮어쓰는 쪽만 이득: 전체 0.360 (온라인 TD 0.395, 극점 100 0.446), 실제 변화 한 번당 플래토 0.9회, h 10⁻²~10⁻⁴에서 안정
-- B (`fepoc/icrl/arch.py`): 실험 4 (d)의 기억 규칙을 고정 구조로 두고 인코더만 사전학습 (비선형 관측, 단서 없는 보상 전환). 같은 구조의 대조군(빠른·긴 극점, 창, 망각 없음)을 모두 이김. Gated DeltaNet과는 전체 오차가 같고 (0.390 대 0.392) 강점이 반대 (gdn: 전환 직후, plateau: 정상 상태). 학습 파라미터 5,508 대 15,875. 시드 하나씩
+- B (`rltdp/icrl/arch.py`): 실험 4 (d)의 기억 규칙을 고정 구조로 두고 인코더만 사전학습 (비선형 관측, 단서 없는 보상 전환). 같은 구조의 대조군(빠른·긴 극점, 창, 망각 없음)을 모두 이김. Gated DeltaNet과는 전체 오차가 같고 (0.390 대 0.392) 강점이 반대 (gdn: 전환 직후, plateau: 정상 상태). 학습 파라미터 5,508 대 15,875. 시드 하나씩
+
+### 계열별 리팩토링, GPU 인수인계
+- 패키지 `fepoc` → `rltdp`. 계열별 하위 패키지: `rltdp/fep/` (자유에너지 PoC: bandit, flows, wm, agent, collect), `rltdp/btsp/`, `rltdp/icrl/`, 공통 `rltdp/common/` (minigrid_env, grid, tdp_block, replay_buffer). btsp·icrl은 fep에 의존하지 않는다
+- 테스트 `tests/common`, `tests/fep` (39개 통과, CPU). 스크립트 `scripts/<계열>/`, 문서 `docs/<계열>/`, 색인 `docs/README.md`, 인수인계 `docs/HANDOVER.md`
+- `rltdp/icrl/arch.py`: `--device` (GPU), `--ctx` (tf 문맥 길이), 결과 파일 이름에 시드. CPU 긴 학습은 GPU로 옮기기 위해 중단 (plateau 250반복 평가까지만)

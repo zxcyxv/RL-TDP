@@ -1,7 +1,7 @@
 [project]
-name = "fepoc"
-version = "0.0.1"
-description = "Exact-likelihood world model vs RSSM-VAE free-energy agent PoC"
+name = "rltdp"
+version = "0.1.0"
+description = "TDP 기억과 시냅스 가소성으로 강화학습을 시도한 계열들: 자유에너지 PoC (fep), BTSP 에이전트 (btsp), 문맥 안 TD 기억 (icrl)"
 requires-python = ">=3.10"
 dependencies = [
   "torch>=2.4",
@@ -13,8 +13,8 @@ dependencies = [
   "minigrid==3.2.0",
 ]
 
-[tool.setuptools]
-packages = ["fepoc"]
+[tool.setuptools.packages.find]
+include = ["rltdp*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
