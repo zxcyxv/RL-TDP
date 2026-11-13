@@ -77,6 +77,7 @@ class MemModel(nn.Module):
         self.variant, self.d, self.nf, self.ns, self.ridge = variant, d, nf, ns, ridge
         self.thr = math.log(1 / hazard)
         self.enc = Enc(d)
+        self.event_log = None                                                   # 진단용: 리스트를 넣으면 (t, 플래토 수)를 쌓는다
 
     def forward(self, task, every=20):
         """체크포인트 (t, V̂ [B, n])의 목록과 플래토 횟수."""
@@ -125,6 +126,8 @@ class MemModel(nn.Module):
                     n_run = torch.where(ev, torch.full_like(n_run, self.nf), n_run)
                     L = torch.where(ev, torch.zeros_like(L), L)
                     events += int(ev.sum())
+                    if self.event_log is not None:
+                        self.event_log.append((t, int(ev.sum())))
                 with torch.no_grad():
                     wf, ws = solve(Af.detach(), bf.detach(), self.ridge), solve(As.detach(), bs.detach(), self.ridge)
             if (t + 1) % every == 0:
