@@ -1,6 +1,6 @@
 # 문서 색인
 
-먼저 읽을 것: [`HANDOVER.md`](HANDOVER.md) (현재 상태와 GPU에서 이어 할 일). 날짜순 전체 기록: [`progress.md`](progress.md).
+먼저 읽을 것: [`ROADMAP.md`](ROADMAP.md) (프로젝트 목표, 요구별 모듈과 단계), [`HANDOVER.md`](HANDOVER.md) (현재 상태와 GPU에서 이어 할 일). 날짜순 전체 기록: [`progress.md`](progress.md).
 
 | 계열 | 상태 | 질문 | 문서 |
 |---|---|---|---|

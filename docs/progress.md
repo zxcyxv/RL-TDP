@@ -143,3 +143,8 @@
 - 패키지 `fepoc` → `rltdp`. 계열별 하위 패키지: `rltdp/fep/` (자유에너지 PoC: bandit, flows, wm, agent, collect), `rltdp/btsp/`, `rltdp/icrl/`, 공통 `rltdp/common/` (minigrid_env, grid, tdp_block, replay_buffer). btsp·icrl은 fep에 의존하지 않는다
 - 테스트 `tests/common`, `tests/fep` (39개 통과, CPU). 스크립트 `scripts/<계열>/`, 문서 `docs/<계열>/`, 색인 `docs/README.md`, 인수인계 `docs/HANDOVER.md`
 - `rltdp/icrl/arch.py`: `--device` (GPU), `--ctx` (tf 문맥 길이), 결과 파일 이름에 시드. CPU 긴 학습은 GPU로 옮기기 위해 중단 (plateau 250반복 평가까지만)
+
+### 프로젝트 재정의: 요구별 모듈화 (`docs/ROADMAP.md`)
+- 목표: 마인크래프트에서 실시간으로 적응하는 에이전트. 추상화: 끝없이 변하는 흐름에서 고정 기억·고정 계산으로 저장한 것의 미래 쓸모를 최대화 (쓰기: 새로움 × 신뢰도 × 관련성, 유지·망각, 선택적 읽기)
+- 공통 지표: 회상 거리, 방해 불변성 (회상 거리 ∝ 1/ρ), 길이 불변성. 단계 R0~R8, 각 단계는 요구 하나 → 최소 형태 → 입증 → 단순화
+- 틀: 자유에너지원리·능동적 추론 (신뢰도·새로움·변화 = 기억 행렬의 칼만 필터의 σ², P, Q), 엔지니어링 참고: DreamerV3, 실시간 학습 계열
