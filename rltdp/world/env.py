@@ -71,4 +71,18 @@ def summarize(rew, dist):
     lap = (last - first) / jnp.maximum(n - 1, 1)                  # 첫 보상 뒤, 보상 사이 평균 스텝
     return dict(rewards=n.mean(), found=(n > 0).mean(), first=jnp.where(n > 0, first + 1, 0).sum() / jnp.maximum((n > 0).sum(), 1),
                 lap=jnp.where(multi, lap, 0).sum() / jnp.maximum(multi.sum(), 1),
-                shortest=jnp.where(multi, dist, 0).sum() / jnp.maximum(multi.sum(), 1), multi=multi.mean())
+                shortest=jnp.where(multi, dist, 0).sum() / jnp.maximum(multi.sum(), 1), multi=multi.mean(),
+                **hist(n))
+
+
+HIST_EDGES = (0, 1, 2, 5, 10, 20, 40)   # 에피소드별 보상 횟수 n의 구간: 0, 1, 2-4, 5-9, 10-19, 20-39, 40+
+
+
+def hist(n):
+    """에피소드별 보상 횟수 분포 (평균만으로는 이봉 분포를 구별할 수 없다). 키 h<lo>_<hi> = 그 구간 에피소드의 비율."""
+    out = {}
+    for lo, hi in zip(HIST_EDGES, HIST_EDGES[1:] + (None,)):
+        m = n >= lo if hi is None else (n >= lo) & (n < hi)
+        out[f"h{lo}" + ("+" if hi is None else f"_{hi - 1}")] = m.mean()
+    out["n_median"] = jnp.median(n)
+    return out
