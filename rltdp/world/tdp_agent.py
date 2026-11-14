@@ -40,6 +40,7 @@ def make_tdp(cfg: E.EnvCfg, mc=None, tex=None, d=128, heads=4, bands=4, periods=
         ks = jax.random.split(key, 8)
         p = jnp.array(periods)
         return dict(Wq=dense(ks[0], d, d), Wk=dense(ks[1], d, d), Wv=dense(ks[2], d, d), Wo=dense(ks[3], d, d),
+                    Wo2=dense(ks[7], d, d),                                             # 오래 남는 시냅스에서 읽은 것의 전용 출력 사영
                     Wgu=dense(ks[4], d, 2 * inter), Wd=jnp.zeros((inter, d)),
                     rope=jax.random.uniform(ks[5], (H, D // 2, 2), minval=-math.pi / 2, maxval=math.pi / 2),
                     pole=jnp.tile(jnp.stack([-jnp.log(p), 2 * math.pi / p])[:, None], (1, H, 1)),      # [2, H, R]: ν, θ
@@ -73,7 +74,7 @@ def make_tdp(cfg: E.EnvCfg, mc=None, tex=None, d=128, heads=4, bands=4, periods=
         cos, sin = jnp.cos(ang), jnp.sin(ang)
         qr, kr = rope(unit(q), cos, sin), rope(unit(k), cos, sin)
         read_w = jnp.einsum("htd,hte->hde", v, kr)                                     # 같은 스텝: Σ_τ v k̃ᵀ
-        nov, m_short, erase = jnp.zeros(()), jnp.zeros((H, D, D)), jnp.zeros((H, D, D))
+        nov, m_short, erase, long = jnp.zeros(()), jnp.zeros((H, D, D)), jnp.zeros((H, D, D)), 0.0
         if ek is not None:
             nu, th = p["pole"]
             mag = jnp.exp(-jnp.exp(nu))
@@ -96,14 +97,15 @@ def make_tdp(cfg: E.EnvCfg, mc=None, tex=None, d=128, heads=4, bands=4, periods=
             m_short = syn(ev_re, ev_im, ek_re, ek_im)                                  # 흔적의 곱 M = Σ_r γ Re(c E_V conj(E_K)ᵀ): 금방 사라진다
             read_w = read_w + m_short
             if W is not None:
-                read_w = read_w + W                                                    # 오래 남는 시냅스
+                # 오래 남는 시냅스는 따로 읽어 자기 출력 사영을 지난다: 얼마나 크게 쓰였는지와 얼마나 크게 반영할지를 떼어 놓는다
+                long = jnp.einsum("hte,hde->htd", qr, W).transpose(1, 0, 2).reshape(T, d) @ p["Wo2"]
                 # 델타 규칙의 지우는 항: 지금의 키 흔적들에서 W가 이미 내는 것. 한 번에 다 지우는 것보다 크지 않게 키 흔적의 총량으로 나눈다
                 wk = lambda e: jnp.einsum("hde,htre->htrd", W, e)
                 tr = (g * cr * (ek_re ** 2 + ek_im ** 2)).sum((1, 2, 3))[:, None, None]
                 erase = syn(wk(ek_re), wk(ek_im), ek_re, ek_im) / (jnp.abs(tr) + 1e-6)
             ek, ev = jnp.stack([ek_re, ek_im], 2), jnp.stack([ev_re, ev_im], 2)
         read = jnp.einsum("hte,hde->htd", qr, read_w).transpose(1, 0, 2).reshape(T, d)
-        h = rms(u + read @ p["Wo"])
+        h = rms(u + read @ p["Wo"] + long)
         gg, a = jnp.split(h @ p["Wgu"], 2, -1)
         return rms(h + (jax.nn.silu(gg) * a) @ p["Wd"]), ek, ev, nov, (m_short, erase)
 
