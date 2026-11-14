@@ -2,9 +2,9 @@
 
 토큰 51개: 이미지 패치 49개 + 행동 토큰 + 보상 토큰. 토큰마다 같은 W_q, W_k, W_v로 질의·키·값을 만든다.
 기억은 시냅스뿐이다: 토큰별 키 흔적 E_K와 값 흔적 E_V의 곱 M = Σ_r γ_r Re(c_r Σ_τ E_V conj(E_K)ᵀ).
-흔적의 곱은 흔적과 함께 사라진다 (60스텝 뒤 0.1~0.2%, scripts/world/tdp_retention.py).
-gate=True면 오래 남는 시냅스 W를 따로 둔다: W ← W + κ · (보상 예측 오차) · M. 보상이 예상과 다를 때만, 그 순간의 흔적 내용이 W로 옮겨진다
-(docs/btsp/tdp_plasticity_rl.md의 제안 A와 같은 꼴). W는 감쇠하지 않고 에피소드마다 비운다.
+흔적은 복소 EMA: E ← ρ exp(iθ) E + (1−ρ) 입력. 키와 값 입력은 유계다.
+gate=True면 W ← Project(W + η(1[RPE>0] M − W G)), G는 PSD, trace ≤ 1, 0 ≤ η ≤ 1. 보상이 예상과 다를 때만, 그 순간의 흔적 내용이 W로 옮겨진다
+W는 전체 감쇠 없이 head별 Frobenius norm ≤ D로 제한하며 에피소드마다 비운다.
 스텝 사이에 넘어가는 것은 흔적과 W뿐이고, 블록의 출력은 넘기지 않는다.
 
 한 스텝:
@@ -62,47 +62,56 @@ def make_tdp(cfg: E.EnvCfg, mc=None, tex=None, d=128, heads=4, bands=4, periods=
         x0, x1 = x[..., 0::2], x[..., 1::2]
         return jnp.stack([x0 * cos - x1 * sin, x0 * sin + x1 * cos], -1).reshape(x.shape)
 
+    def trace_coeff(p):
+        nu, th = p["pole"]
+        # Keep finite forgetting times; no global decay is applied to long memory.
+        rate = jnp.clip(jnp.exp(jnp.clip(nu, -12.0, 4.0)), 1 / 512, 1.0)
+        rho = jnp.exp(-rate)
+        b = lambda x: x[:, None, :, None]
+        return (b(rho * jnp.cos(th)), b(rho * jnp.sin(th)),
+                b(-jnp.expm1(-rate)), b(jax.nn.softmax(p["c"][0], axis=-1)))
+
+    def moments(kr, ki, vr, vi, weights):
+        # A common denominator keeps write targets and the PSD erase operator consistent.
+        cross = (jnp.einsum("htrd,htre->hde", weights * vr, kr)
+                 + jnp.einsum("htrd,htre->hde", weights * vi, ki))
+        gram = (jnp.einsum("htrd,htre->hde", weights * kr, kr)
+                + jnp.einsum("htrd,htre->hde", weights * ki, ki))
+        denom = jnp.maximum(jnp.trace(gram, axis1=-2, axis2=-1), 1.0)[:, None, None]
+        return cross / denom, gram / denom
+
     def block(p, u, ek=None, ev=None, W=None):
         """u [T, d], ek / ev [H, T, 2, R, D] (실수부, 허수부). 반환: 블록 출력, 새 흔적, 새로 쓴 비율, 흔적으로 만든 시냅스.
         ek가 None이면 지각 블록: 같은 스텝의 토큰끼리만 섞고 시냅스는 없다.
         W [H, D, D]가 있으면 오래 남는 시냅스로 같이 읽는다."""
         heads_ = lambda x: x.reshape(T, H, D).transpose(1, 0, 2)
-        q, k, v = heads_(u @ p["Wq"]), heads_(u @ p["Wk"]), heads_(u @ p["Wv"])
+        u = rms(u)  # pre-normalize every projection, including the first perceptual block
+        q, k, v = heads_(u @ p["Wq"]), heads_(u @ p["Wk"]), jnp.tanh(heads_(u @ p["Wv"]))
         unit = lambda x: x / (jnp.linalg.norm(x, axis=-1, keepdims=True) + 1e-4)
         ang = jnp.einsum("hjc,tc->htj", p["rope"], xy)                                 # 패치는 2차원 위치로 회전, 특수 토큰은 0
         ang = jnp.concatenate([ang, jnp.zeros((H, 2, D // 2))], 1)
         cos, sin = jnp.cos(ang), jnp.sin(ang)
         qr, kr = rope(unit(q), cos, sin), rope(unit(k), cos, sin)
-        read_w = jnp.einsum("htd,hte->hde", v, kr)                                     # 같은 스텝: Σ_τ v k̃ᵀ
+        read_w = jnp.einsum("htd,hte->hde", v, kr) / T                                 # 같은 스텝: Σ_τ v k̃ᵀ
         nov, m_short, erase, long = jnp.zeros(()), jnp.zeros((H, D, D)), jnp.zeros((H, D, D)), 0.0
         if ek is not None:
-            nu, th = p["pole"]
-            mag = jnp.exp(-jnp.exp(nu))
-            b = lambda x: x[:, None, :, None]
-            zr, zi, g = b(mag * jnp.cos(th)), b(mag * jnp.sin(th)), b(jnp.sqrt(-jnp.expm1(-2 * jnp.exp(nu))))
-            cr, ci = b(p["c"][0]), b(p["c"][1])
-            syn = lambda e_re, e_im, k_re, k_im: (jnp.einsum("htrd,htre->hde", g * (cr * e_re - ci * e_im), k_re)
-                                                  + jnp.einsum("htrd,htre->hde", g * (cr * e_im + ci * e_re), k_im))
+            zr, zi, gain, weights = trace_coeff(p)
             ek_re, ek_im, ev_re, ev_im = ek[:, :, 0], ek[:, :, 1], ev[:, :, 0], ev[:, :, 1]
-            ek_re, ek_im = zr * ek_re - zi * ek_im, zr * ek_im + zi * ek_re            # 한 스텝 감쇠
+            ek_re, ek_im = zr * ek_re - zi * ek_im, zr * ek_im + zi * ek_re
             ev_re, ev_im = zr * ev_re - zi * ev_im, zr * ev_im + zi * ev_re
-            w = v
-            if delta:                                                                  # 새로운 것만 쓴다: 값 − 시냅스가 이 키로 이미 내는 값
-                w = v - jnp.einsum("hde,hte->htd", syn(ev_re, ev_im, ek_re, ek_im), kr)
-                # 토큰 51개가 같은 스텝에 함께 쓴다. 키가 서로 겹치는 만큼 같은 내용이 여러 번 쓰이므로, 겹침의 합으로 나눈다
-                w = w / jnp.abs(jnp.einsum("hte,hse->hts", kr, kr)).sum(-1, keepdims=True)
-                nov = jnp.mean(w * w) / (jnp.mean(v * v) + 1e-8)
-            ek_re = ek_re + g * kr[:, :, None]                                         # 키 흔적 (크기 1로 맞춰짐)
-            ev_re = ev_re + g * w[:, :, None]                                          # 값 흔적 (delta면 오차의 흔적)
-            m_short = syn(ev_re, ev_im, ek_re, ek_im)                                  # 흔적의 곱 M = Σ_r γ Re(c E_V conj(E_K)ᵀ): 금방 사라진다
+            old, _ = moments(ek_re, ek_im, ev_re, ev_im, weights)
+            pred = jnp.einsum("hde,hte->htd", old, kr)
+            # Bounded innovations: rotation/decay plus (1-rho) input is contractive.
+            w = jnp.tanh(v - pred) if delta else v
+            nov = jnp.mean((v - pred) ** 2) / (jnp.mean(v * v) + 1e-8)
+            ek_re = ek_re + gain * kr[:, :, None]
+            ev_re = ev_re + gain * w[:, :, None]
+            m_short, gram = moments(ek_re, ek_im, ev_re, ev_im, weights)
             read_w = read_w + m_short
             if W is not None:
-                # 오래 남는 시냅스는 따로 읽어 자기 출력 사영을 지난다: 얼마나 크게 쓰였는지와 얼마나 크게 반영할지를 떼어 놓는다
                 long = jnp.einsum("hte,hde->htd", qr, W).transpose(1, 0, 2).reshape(T, d) @ p["Wo2"]
-                # 델타 규칙의 지우는 항: 지금의 키 흔적들에서 W가 이미 내는 것. 한 번에 다 지우는 것보다 크지 않게 키 흔적의 총량으로 나눈다
-                wk = lambda e: jnp.einsum("hde,htre->htrd", W, e)
-                tr = (g * cr * (ek_re ** 2 + ek_im ** 2)).sum((1, 2, 3))[:, None, None]
-                erase = syn(wk(ek_re), wk(ek_im), ek_re, ek_im) / (jnp.abs(tr) + 1e-6)
+                # gram is PSD with trace <= 1; I - eta*gram is non-expansive.
+                erase = jnp.einsum("hde,hef->hdf", W, gram)
             ek, ev = jnp.stack([ek_re, ek_im], 2), jnp.stack([ev_re, ev_im], 2)
         read = jnp.einsum("hte,hde->htd", qr, read_w).transpose(1, 0, 2).reshape(T, d)
         h = rms(u + read @ p["Wo"] + long)
@@ -133,16 +142,12 @@ def make_tdp(cfg: E.EnvCfg, mc=None, tex=None, d=128, heads=4, bands=4, periods=
         for bp in p["percept"]:
             u = block(bp, u)[0]
         m = p["mem"]
-        nu, th = m["pole"]
-        mag = jnp.exp(-jnp.exp(nu))
-        b = lambda x: x[:, None, :, None]
-        zr, zi, g = b(mag * jnp.cos(th)), b(mag * jnp.sin(th)), b(jnp.sqrt(-jnp.expm1(-2 * jnp.exp(nu))))
-        cr, ci = b(m["c"][0]), b(m["c"][1])
+        zr, zi, _, weights = trace_coeff(m)
         ek_re, ek_im, ev_re, ev_im = c["ek"][:, :, 0], c["ek"][:, :, 1], c["ev"][:, :, 0], c["ev"][:, :, 1]
         ek_re, ek_im = zr * ek_re - zi * ek_im, zr * ek_im + zi * ek_re
         ev_re, ev_im = zr * ev_re - zi * ev_im, zr * ev_im + zi * ev_re
-        M = (jnp.einsum("htrd,htre->hde", g * (cr * ev_re - ci * ev_im), ek_re)
-             + jnp.einsum("htrd,htre->hde", g * (cr * ev_im + ci * ev_re), ek_im))
+        M, _ = moments(ek_re, ek_im, ev_re, ev_im, weights)
+        u = rms(u)
         q = (u[TOK_REW] @ m["Wq"]).reshape(H, D)
         q = q / (jnp.linalg.norm(q, axis=-1, keepdims=True) + 1e-4)                    # 특수 토큰은 회전 없음
         M = M + c["W"] if gate else M
@@ -159,10 +164,17 @@ def make_tdp(cfg: E.EnvCfg, mc=None, tex=None, d=128, heads=4, bands=4, periods=
         # 오래 남는 시냅스의 델타 규칙. 예상보다 좋으면 지금의 흔적 내용을 옮겨 쓰고, 오차의 크기만큼 그 키들에 있던 옛 내용을 지운다.
         # 예상했는데 안 오면 지우기만 한다.
         ms, erase = ms
-        W = c["W"] + jnp.exp(p["log_kappa"]) * jnp.maximum(rpe, 0.0) * ms - jnp.abs(rpe) * erase
+        eta = -jnp.expm1(-jax.nn.softplus(p["log_kappa"]) * jnp.abs(rpe))
+        W_raw = c["W"] + eta * (jnp.where(rpe > 0, ms, 0.0) - erase)
+        # Projected delta rule: radius D permits D orthogonal unit keys with
+        # values of norm sqrt(D). Projection guarantees bounded state across training.
+        wn = jnp.sqrt(jnp.sum(W_raw * W_raw, axis=(-2, -1), keepdims=True) + 1e-12)
+        W = W_raw / jnp.maximum(wn / D, 1.0) if gate else jnp.zeros_like(W_raw)
         new = dict(st=st2, o=o2, r=r, ek=ek, ev=ev, W=W)
         return new, dict(r=r, v=v_hat[a], obs=jnp.mean((o_hat[a] - o2) ** 2), rew=(r_hat[a] - r) ** 2, nov=nov,
-                         Wn=jnp.sqrt(jnp.mean(W * W)), Mn=jnp.sqrt(jnp.mean(ms * ms)))
+                         Wn=jnp.sqrt(jnp.mean(W * W)), Mn=jnp.sqrt(jnp.mean(ms * ms)),
+                         eta=eta, Wclip=jnp.mean(wn > D), Vn=jnp.sqrt(jnp.mean(ev * ev)),
+                         kappa=jax.nn.softplus(p["log_kappa"]))
 
     def loss(p, outs, carry):
         """outs의 축 [B, L]. 앞으로 받을 보상의 정답은 조각 안에서 뒤에서부터 계산한 λ-수익 (정답 쪽은 경사를 끊는다)."""
