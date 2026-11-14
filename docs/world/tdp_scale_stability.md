@@ -18,3 +18,17 @@ Tradeoffs: bounded values and averaged moments can reduce signal strength; posit
 Validation: CPU 512-step adversarial rollout (100x value projection and band logits, kappa parameter 20, near-unit decay), state bounds, finite recurrent gradients, and gate=False zero-state check. Tests live in tests/world/test_tdp_stability.py; invoked directly because pytest is absent from /venv/jax.
 
 Run: supervisor program rltdp-stable, 960 iterations, B=40, L=32, eval_B=1024, seed=0. Outputs: runs/world/stable_20261114/tdp_stable.jsonl and checkpoint arrays. Logs: /var/log/portal/rltdp-stable.log. Previous run outputs are preserved. No automatic restart after completion or failure.
+
+## Results through iteration 400
+
+Stopped at the user's request after the iteration-400 evaluation. The process may have executed additional unevaluated updates before stopping; no exact iteration-400 optimizer-state checkpoint was saved. The best parameter checkpoint corresponds to the iteration-400 evaluation and remains locally under the ignored runs directory. Supervisor status is STOPPED; automatic restart is disabled.
+
+| Iteration | Reward | Found | Short RMS | Long RMS | Projection fraction |
+| --- | --- | --- | --- | --- | --- |
+| 80 | 3.029 | 0.881 | 0.0281 | 0.0338 | 0.0 |
+| 160 | 2.696 | 0.865 | 0.0329 | 0.0480 | 0.0 |
+| 240 | 4.688 | 0.602 | 0.0365 | 0.0603 | 0.0 |
+| 320 | 2.593 | 0.844 | 0.0358 | 0.0465 | 0.0 |
+| 400 | 6.353 | 0.242 | 0.0335 | 0.0490 | 0.0 |
+
+Memory magnitude stayed small in the sampled training metrics without activating the projection. This does not establish stable learning: reward fluctuated and evaluation discovery fell to 24.2% at iteration 400. The 6.353 mean reward therefore coexists with failure to find any reward in most episodes. Multiple scale changes were made together, so these results cannot isolate their individual effects. Full evaluation records through iteration 400 are preserved in results/tdp_stable_20261114_400.jsonl.
