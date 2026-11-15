@@ -1,0 +1,326 @@
+[
+ {
+  "keys": "random",
+  "seed": 0,
+  "d": 4,
+  "D": 32,
+  "S": 0.508,
+  "key_norms": {
+   "junction": 1.0,
+   "corridor": 1.0,
+   "room": 1.0
+  }
+ },
+ {
+  "keys": "random",
+  "seed": 0,
+  "d": 4,
+  "D": 256,
+  "S": 0.508,
+  "key_norms": {
+   "junction": 1.0,
+   "corridor": 1.0,
+   "room": 1.0
+  }
+ },
+ {
+  "keys": "random",
+  "seed": 0,
+  "d": 4,
+  "D": 2048,
+  "S": 0.508,
+  "key_norms": {
+   "junction": 1.0,
+   "corridor": 1.0,
+   "room": 1.0
+  }
+ },
+ {
+  "keys": "random",
+  "seed": 1,
+  "d": 4,
+  "D": 32,
+  "S": 0.033,
+  "key_norms": {
+   "junction": 1.0,
+   "corridor": 1.0,
+   "room": 1.0
+  }
+ },
+ {
+  "keys": "random",
+  "seed": 1,
+  "d": 4,
+  "D": 256,
+  "S": 0.033,
+  "key_norms": {
+   "junction": 1.0,
+   "corridor": 1.0,
+   "room": 1.0
+  }
+ },
+ {
+  "keys": "random",
+  "seed": 1,
+  "d": 4,
+  "D": 2048,
+  "S": 0.033,
+  "key_norms": {
+   "junction": 1.0,
+   "corridor": 1.0,
+   "room": 1.0
+  }
+ },
+ {
+  "keys": "random",
+  "seed": 2,
+  "d": 4,
+  "D": 32,
+  "S": -0.002,
+  "key_norms": {
+   "junction": 1.0,
+   "corridor": 1.0,
+   "room": 1.0
+  }
+ },
+ {
+  "keys": "random",
+  "seed": 2,
+  "d": 4,
+  "D": 256,
+  "S": -0.002,
+  "key_norms": {
+   "junction": 1.0,
+   "corridor": 1.0,
+   "room": 1.0
+  }
+ },
+ {
+  "keys": "random",
+  "seed": 2,
+  "d": 4,
+  "D": 2048,
+  "S": -0.002,
+  "key_norms": {
+   "junction": 1.0,
+   "corridor": 1.0,
+   "room": 1.0
+  }
+ },
+ {
+  "keys": "surp",
+  "seed": 0,
+  "d": 4,
+  "D": 32,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 1.0,
+   "corridor": 1.0,
+   "room": 1.0
+  }
+ },
+ {
+  "keys": "surp",
+  "seed": 0,
+  "d": 4,
+  "D": 256,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 1.0,
+   "corridor": 1.0,
+   "room": 1.0
+  }
+ },
+ {
+  "keys": "surp",
+  "seed": 0,
+  "d": 4,
+  "D": 2048,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 1.0,
+   "corridor": 1.0,
+   "room": 1.0
+  }
+ },
+ {
+  "keys": "surp",
+  "seed": 1,
+  "d": 4,
+  "D": 32,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 1.0,
+   "corridor": 1.0,
+   "room": 1.0
+  }
+ },
+ {
+  "keys": "surp",
+  "seed": 1,
+  "d": 4,
+  "D": 256,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 1.0,
+   "corridor": 1.0,
+   "room": 1.0
+  }
+ },
+ {
+  "keys": "surp",
+  "seed": 1,
+  "d": 4,
+  "D": 2048,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 1.0,
+   "corridor": 1.0,
+   "room": 1.0
+  }
+ },
+ {
+  "keys": "surp",
+  "seed": 2,
+  "d": 4,
+  "D": 32,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 1.0,
+   "corridor": 1.0,
+   "room": 1.0
+  }
+ },
+ {
+  "keys": "surp",
+  "seed": 2,
+  "d": 4,
+  "D": 256,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 1.0,
+   "corridor": 1.0,
+   "room": 1.0
+  }
+ },
+ {
+  "keys": "surp",
+  "seed": 2,
+  "d": 4,
+  "D": 2048,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 1.0,
+   "corridor": 1.0,
+   "room": 1.0
+  }
+ },
+ {
+  "keys": "learned",
+  "seed": 0,
+  "d": 4,
+  "D": 32,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 2.707,
+   "corridor": 1.321,
+   "room": 0.173
+  }
+ },
+ {
+  "keys": "learned",
+  "seed": 0,
+  "d": 4,
+  "D": 256,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 2.707,
+   "corridor": 1.321,
+   "room": 0.173
+  }
+ },
+ {
+  "keys": "learned",
+  "seed": 0,
+  "d": 4,
+  "D": 2048,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 2.707,
+   "corridor": 1.321,
+   "room": 0.173
+  }
+ },
+ {
+  "keys": "learned",
+  "seed": 1,
+  "d": 4,
+  "D": 32,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 1.214,
+   "corridor": 0.829,
+   "room": 0.115
+  }
+ },
+ {
+  "keys": "learned",
+  "seed": 1,
+  "d": 4,
+  "D": 256,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 1.214,
+   "corridor": 0.829,
+   "room": 0.115
+  }
+ },
+ {
+  "keys": "learned",
+  "seed": 1,
+  "d": 4,
+  "D": 2048,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 1.214,
+   "corridor": 0.829,
+   "room": 0.115
+  }
+ },
+ {
+  "keys": "learned",
+  "seed": 2,
+  "d": 4,
+  "D": 32,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 3.25,
+   "corridor": 1.407,
+   "room": 0.236
+  }
+ },
+ {
+  "keys": "learned",
+  "seed": 2,
+  "d": 4,
+  "D": 256,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 3.25,
+   "corridor": 1.407,
+   "room": 0.236
+  }
+ },
+ {
+  "keys": "learned",
+  "seed": 2,
+  "d": 4,
+  "D": 2048,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 3.25,
+   "corridor": 1.407,
+   "room": 0.236
+  }
+ }
+]
