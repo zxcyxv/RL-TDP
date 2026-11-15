@@ -1,0 +1,26 @@
+EB sigma2 [0.055810000747442245, 0.053679998964071274, 0.05559000000357628, 0.05305999889969826, 0.029489999637007713, 0.05051000043749809, 0.05618000030517578, 0.052230000495910645, 0.0545400008559227, 0.00013000000035390258, 0.0004799999878741801, 0.0006699999794363976] R [2.4000000848900527e-05, 2.5999999706982635e-05, 2.300000051036477e-05, 3.099999958067201e-05, 3.300000025774352e-05, 2.4000000848900527e-05, 3.099999958067201e-05, 2.099999983329326e-05, 1.9999999494757503e-05, 6.299999949987978e-05, 0.0009270000155083835, 0.0010100000072270632]
+train steps 115584
+[block] it 0 train -181.855 | val total -183.010 val slot -22.2745
+[block] it 250 train -306.687 | val total -299.689 val slot -25.4365
+[block] it 500 train -356.883 | val total -323.340 val slot -31.0475
+[block] it 750 train -403.123 | val total -299.548 val slot -32.8532
+[block] it 1000 train -411.493 | val total -249.532 val slot -32.9385
+[block] it 1250 train -428.734 | val total -217.954 val slot -32.7968
+[block] it 1500 train -439.993 | val total -156.008 val slot -33.2154
+[block] it 1750 train -454.951 | val total -122.934 val slot -33.6700
+[block] it 2000 train -471.759 | val total 67.660 val slot -30.6980
+[block] it 2250 train -479.512 | val total 252.108 val slot -30.0464
+[block] it 2500 train -491.596 | val total 484.430 val slot -25.1007
+[block] it 2750 train -504.846 | val total 898.955 val slot -17.6824
+[block] it 3000 train -516.617 | val total 1391.333 val slot -4.9770
+[block] it 3250 train -525.909 | val total 1883.725 val slot 8.3895
+[block] it 3500 train -535.058 | val total 2541.617 val slot 36.8668
+[block] it 3750 train -534.091 | val total 3013.287 val slot 61.6545
+[block] it 3999 train -530.868 | val total 3170.413 val slot 69.3526
+best val it 500
+train nll/step: memoryless wm -181.557 | block m=0 8452.864 | block full -377.892
+synapse direct (12.7)  b1 0.742 b0 0.258 other 0.000
+block                  b1 0.312 b0 0.238 other 0.449
+block m=0              b1 0.176 b0 0.203 other 0.621
+{"synapse direct (12.7)": {"b1": 0.7421875, "b0": 0.2578125, "other": 0.0}, "block": {"b1": 0.3125, "b0": 0.23828125, "other": 0.44921875}, "block m=0": {"b1": 0.17578125, "b0": 0.203125, "other": 0.62109375}}
+arrival slot, test worlds (linear vs block): {"nll_arrival_linear": 108.88298797607422, "nll_arrival_block": 101.27743530273438, "nll_blank_linear": -25.9949893951416, "nll_blank_block": -33.26126480102539, "acc_first5": [0.4, 0.4], "acc_revisit": [0.8, 0.8], "acc_b0_C": [0.0, 0.0]}

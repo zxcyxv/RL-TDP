@@ -1,0 +1,38 @@
+[wm+mem] it 0 nll/step -181.211
+[wm+mem] it 25 nll/step -164.906
+[wm+mem] it 50 nll/step -178.177
+[wm+mem] it 75 nll/step -186.346
+[wm+mem] it 100 nll/step -201.907
+[wm+mem] it 125 nll/step -205.185
+[wm+mem] it 150 nll/step -211.659
+[wm+mem] it 175 nll/step -215.906
+[wm+mem] it 200 nll/step -223.732
+[wm+mem] it 225 nll/step -222.860
+[wm+mem] it 250 nll/step -222.528
+[wm+mem] it 275 nll/step -223.598
+[wm+mem] it 300 nll/step -229.574
+[wm+mem] it 325 nll/step -225.136
+[wm+mem] it 350 nll/step -232.110
+[wm+mem] it 375 nll/step -230.286
+[wm+mem] it 400 nll/step -239.908
+[wm+mem] it 425 nll/step -236.761
+[wm+mem] it 450 nll/step -229.031
+[wm+mem] it 475 nll/step -231.006
+[wm+mem] it 500 nll/step -234.473
+[wm+mem] it 525 nll/step -241.816
+[wm+mem] it 550 nll/step -236.975
+[wm+mem] it 575 nll/step -242.701
+[wm+mem] it 600 nll/step -242.319
+[wm+mem] it 625 nll/step -247.601
+[wm+mem] it 650 nll/step -249.194
+[wm+mem] it 675 nll/step -252.212
+[wm+mem] it 700 nll/step -253.786
+[wm+mem] it 725 nll/step -255.130
+[wm+mem] it 750 nll/step -240.540
+[wm+mem] it 775 nll/step -243.932
+[wm+mem] it 799 nll/step -242.676
+full    {"b1": 0.1796875, "b0": 0.171875, "other": 0.6484375, "gain_arrival": 0.4997580945491791, "gain_blank": 0.2316265106201172, "var_arrival": 0.008620426058769226, "var_blank": 0.0012526934733614326}
+m = 0   {"b1": 0.21875, "b0": 0.22265625, "other": 0.55859375, "gain_arrival": 0.4997580945491791, "gain_blank": 0.2316265106201172, "var_arrival": 0.008620426058769226, "var_blank": 0.0012526934733614326}
+{"lr": 0.001, "poles": [0.0, 2.0, 4.0, 8.0], "kd": 64, "iters": 800, "c": [1.4827520847320557, 1.6506562232971191, 1.5289922952651978, 1.7266290187835693, 0.9522483348846436, 1.5808448791503906, 1.480942964553833, 1.5706902742385864, 1.3974789381027222, 0.895381510257721, 1.365460753440857, 1.2816568613052368], "R": [0.0006744202109985054, 0.0006058215512894094, 0.0006540262256748974, 0.000579164654482156, 0.0010501518845558167, 0.0006325720460154116, 0.0006752468761987984, 0.0006366632878780365, 0.0007155757630243897, 0.0011168435448780656, 0.0007323548197746277, 0.0007802421459928155], "full": {"b1": 0.1796875, "b0": 0.171875, "other": 0.6484375, "gain_arrival": 0.4997580945491791, "gain_blank": 0.2316265106201172, "var_arrival": 0.008620426058769226, "var_blank": 0.0012526934733614326}, "m0": {"b1": 0.21875, "b0": 0.22265625, "other": 0.55859375, "gain_arrival": 0.4997580945491791, "gain_blank": 0.2316265106201172, "var_arrival": 0.008620426058769226, "var_blank": 0.0012526934733614326}}
+full    teacher arrivals: correct item  first-5 0.400  later 0.667
+m = 0   teacher arrivals: correct item  first-5 0.400  later 0.667

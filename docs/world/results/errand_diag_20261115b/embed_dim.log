@@ -1,0 +1,9 @@
+== H=8
+s_slot=1 False, addr=[e;k] True, s_all=1 True, public True | hand B    b1 0.789 b0 0.211 other 0.000 | written 0.52 | |read| 0.176
+s_slot=1 False, addr=[e;k] True, s_all=1 True, public True | learned u b1 0.281 b0 0.609 other 0.109 | written 0.52 | |read| 0.176
+== H=32
+  warnings.warn(message)
+s_slot=1 False, addr=[e;k] True, s_all=1 True, public True | hand B    b1 0.578 b0 0.422 other 0.000 | written 0.53 | |read| 0.522
+s_slot=1 False, addr=[e;k] True, s_all=1 True, public True | learned u b1 0.316 b0 0.469 other 0.215 | written 0.53 | |read| 0.522
+== H=64
+  warnings.warn(message)
