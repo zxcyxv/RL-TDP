@@ -1,5 +1,5 @@
 """스스로 움직이는 에이전트 + 목표 전환: GRU 대 GRU + 시냅스 (docs/world/README.md 10절).
-/venv/jax/bin/python -I scripts/world/goal_forage.py docs/world/results/goal_forage_20261115.json [iters]
+/venv/jax/bin/python -I scripts/world/goal_forage.py OUT.json ITERS N T KIND [KIND ...]
 """
 import json, os, sys, time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -10,10 +10,13 @@ from rltdp.world import goal_forage as GF
 
 out = sys.argv[1]
 iters = int(sys.argv[2]) if len(sys.argv) > 2 else 1500
+N_ = int(sys.argv[3]) if len(sys.argv) > 3 else 9
+T_ = int(sys.argv[4]) if len(sys.argv) > 4 else 256
+kinds = sys.argv[5:] or ["gru", "synapse"]
 B, L, seed = 64, 32, 0
 rows = []
-for kind in ("gru", "synapse"):
-    ag = GF.make(kind, seed)
+for kind in kinds:
+    ag = GF.make(kind, seed, N_)
     params = ag["init"](jax.random.PRNGKey(seed))
     opt = optax.chain(optax.clip_by_global_norm(1.0), optax.adam(3e-4))
     st = opt.init(params)
@@ -35,8 +38,8 @@ for kind in ("gru", "synapse"):
     @jax.jit
     def evaluate(p, key):
         k1, k2 = jax.random.split(key)
-        carry = jax.vmap(ag["carry0"])(jax.random.split(k1, 1024))
-        _, outs = rollout(p, carry, k2, GF.T)
+        carry = jax.vmap(ag["carry0"])(jax.random.split(k1, 512))
+        _, outs = rollout(p, carry, k2, T_)
         end, length, seen = jax.vmap(GF.segments)(outs["r"], outs["seen"])
         m_seen, m_new = end & seen, end & ~seen
         return dict(rewards=outs["r"].sum(1).mean(),
@@ -48,11 +51,11 @@ for kind in ("gru", "synapse"):
     for it in range(1, iters + 1):
         key, kr = jax.random.split(key)
         carry = reset(kr)
-        for _ in range(GF.T // L):
+        for _ in range(T_ // L):
             key, ku = jax.random.split(key)
             params, st, carry, l, rw = update(params, st, carry, ku)
-        if it % 250 == 0 or it == iters:
+        if it % max(iters // 6, 1) == 0 or it == iters:
             ev = {k: round(float(v), 3) for k, v in evaluate(params, jax.random.PRNGKey(77)).items()}
-            rows.append(dict(agent=kind, it=it, sec=round(time.time() - t0), **ev))
+            rows.append(dict(agent=kind, N=N_, T=T_, it=it, sec=round(time.time() - t0), **ev))
             print(rows[-1], flush=True)
     json.dump(rows, open(out, "w"), indent=1)
