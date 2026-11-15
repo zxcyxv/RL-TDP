@@ -17,7 +17,7 @@ import optax
 
 from . import errand as ER
 
-H, DK, SWI = 8, 128, 128
+H, DK, SWI = int(__import__("os").environ.get("ERRAND_H", 8)), 128, 128          # ERRAND_H: 픽셀 임베딩 차원 (12.8)
 HY = 12 * H
 HO = HY                                          # 시냅스·월드 모델의 출력 = 관측 특징만 (보상은 느린 보상 머리가 맡는다)
 CARD = 9

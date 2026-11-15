@@ -19,7 +19,7 @@ import optax
 from . import errand as ER
 from . import errand_learned as EL
 
-H, DK, SWI, NP = 8, 128, 128, 12
+H, DK, SWI, NP = int(__import__("os").environ.get("ERRAND_H", 8)), 128, 128, 12
 HY = NP * H
 ALPHA, R_OBS = 2.0 ** (-1 / 8), 0.01
 SLOT = EL.SLOT
