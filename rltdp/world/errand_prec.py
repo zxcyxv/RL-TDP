@@ -28,8 +28,10 @@ SLOT = EL.SLOT
 def init(key):
     ks = jax.random.split(key, 4)
     d = lambda k, i, o, s=1.0: jax.random.normal(k, (i, o)) * s / jnp.sqrt(i)
+    k5, _ = jax.random.split(ks[3])
     return dict(wm1=d(ks[0], HY + ER.NA, 256), wb1=jnp.zeros(256), wm2=d(ks[1], 256, HY + NP, 0.1), wb2=jnp.zeros(HY + NP),
-                Ku=d(ks[2], HY + ER.NA, 2 * SWI), Kd=d(ks[3], SWI, DK))
+                Ku=d(ks[2], 9 * H + ER.NA, 2 * SWI), Kd=d(ks[3], SWI, DK),
+                Wr=jax.random.normal(k5, (ER.NA, DK, 9 * H)) / jnp.sqrt(9.0 * H))            # 고정 난수 키 (시야 9칸만)
 
 
 def parts(p, We, ybar, kind):
@@ -41,12 +43,13 @@ def parts(p, We, ybar, kind):
         out = jax.nn.relu(x @ p["wm1"] + p["wb1"]) @ p["wm2"] + p["wb2"]
         return out[:HY].reshape(NP, H), out[HY:]                                   # 평균 [12, 8], 로그 분산 [12]
 
-    def key(o, a):
+    def key(o, a):                                       # 주소는 시야 9칸과 행동만 (HUD = 의뢰 카드·도착·도장은 주소에 넣지 않는다, 12.4)
+        w = feat(o)[:9].reshape(-1)
         if kind == "learned":
-            x = jnp.concatenate([feat(o).reshape(-1), jax.nn.one_hot(a, ER.NA)])
+            x = jnp.concatenate([w, jax.nn.one_hot(a, ER.NA)])
             g, u = jnp.split(x @ p["Ku"], 2, -1)
             return (jax.nn.silu(g) * u) @ p["Kd"]
-        k = ER.fixed(0)[0](o)[a]
+        k = p["Wr"][a] @ w
         return k / (jnp.linalg.norm(k) + 1e-8)
     return feat, wm, key
 
@@ -59,15 +62,19 @@ def gauss_logpdf(e, var):
     return -0.5 * (jnp.sum(e * e) / var + e.shape[0] * jnp.log(2 * jnp.pi * var))
 
 
-def write_scan(p, We, ybar, kind, vmax, O, acts, c0, evidence=False):
+def write_scan(p, We, ybar, kind, vmax, O, acts, c0, evidence=False, stop_t=None):
     """evidence=True: 칸별 증거 망각. 칸 p마다 '그대로' N(M_p z, R + zᵀP_p z) 대 '바뀜' N(0, R + v_p)
     (그 칸의 내용이 사전분포에서 새로 뽑혔다, v_p = 월드 모델이 예측한 그 칸의 세계 간 분산)의 우도비로 변화 확률 χ_p,
     P_p += χ_p (v_p / |z|²) ẑẑᵀ (그 방향으로 예측 분산이 v_p만큼 는다). 칸별 사건 위험률 h_p ~ Beta(a_p, b_p) 온라인, 사전 Beta(1, 1)."""
+    """stop_t: 이 스텝 뒤로는 M, P에 쓰지 않는다 (흔적 e는 계속 진행). 판정을 'C 도착 직후의 기억'으로 맞추기 위함 (12.4)."""
     feat, wm, key = parts(p, We, ybar, kind)
+    T = acts.shape[0]
+    stop_t = T if stop_t is None else stop_t
 
     def f(c, x):
         M, P, e, ha, hb = c
-        o, a, o2 = x
+        o, a, o2, t = x
+        M_in, P_in = M, P
         e = ALPHA * e + key(o, a)
         mu, lv = wm(o, a)
         s = jnp.sqrt(jnp.exp(lv) / vmax)                                             # [12]
@@ -92,8 +99,11 @@ def write_scan(p, We, ybar, kind, vmax, O, acts, c0, evidence=False):
             Pp = Pp - jnp.outer(Pz, Pz) / S
             return Mp, Pp, nll, hap, hbp
         M, P, nll, ha, hb = jax.vmap(per_patch)(M, P, s, r, v, ha, hb)
+        keep = t > stop_t
+        M = jnp.where(keep, M_in, M)
+        P = jnp.where(keep, P_in, P)
         return (M, P, e, ha, hb), nll.sum()
-    return jax.lax.scan(f, c0, (O[:-1], acts, O[1:]))
+    return jax.lax.scan(f, c0, (O[:-1], acts, O[1:], jnp.arange(T)))
 
 
 def train(kind, seed=0, D=256, n_train=512, iters_wm=400, iters_k=600, B=32, L=64, log=print):
@@ -166,7 +176,10 @@ def probe(p, vmax, kind, seed=0, evidence=False):
 
     def one(sess, plans, arrive_idx):
         O, s_end, _ = EL.observe_stream(sess)
-        (M, P, e, _, _), _ = write_scan(p, We, ybar, kind, vmax, O, sess["acts"], c_init(), evidence=evidence)
+        blank = ER.TEX[ER.BLANK].reshape(-1)
+        arrived = ~jnp.all(jnp.isclose(O[1:, SLOT], blank), -1)                     # 각 스텝 뒤 관측에 산출물 도착
+        t_c = jnp.max(jnp.where(arrived, jnp.arange(arrived.shape[0]), -1))         # 마지막 도착 = b0 재방문의 C
+        (M, P, e, _, _), _ = write_scan(p, We, ybar, kind, vmax, O, sess["acts"], c_init(), evidence=evidence, stop_t=t_c)
 
         def sim(plan, ai):
             def f(c, a):

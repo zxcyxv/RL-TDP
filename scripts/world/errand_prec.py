@@ -15,11 +15,14 @@ b1, b0 = np.array(stack["b1"]), np.array(stack["b0"])
 res = {}
 for name, kind in (("random_keys_WM", "random"), ("learned_keys_WM", "learned")):
     p, vmax = EP.train(kind, log=lambda m: print(m, flush=True))
-    for ev in (False, True):
+    for ev in (False,):
         sc = np.array(jax.jit(jax.vmap(EP.probe(p, vmax, kind, evidence=ev)))(stack, plans, arrive))
-        best = sc.argmax(1)
-        res[name + ("+evidence" if ev else "")] = dict(b1=float(np.mean(best == b1)), b0_stale=float(np.mean(best == b0)), other=float(np.mean((best != b1) & (best != b0))))
-        print(name + ("+evidence" if ev else ""), res[name + ("+evidence" if ev else "")], flush=True)
+        mx = sc.max(1, keepdims=True)
+        tied = (np.abs(sc - mx) < 1e-6).sum(1) > 1
+        rng = np.random.default_rng(0)
+        best = (sc + 1e-9 * rng.random(sc.shape)).argmax(1)                        # 동점은 무작위
+        res[name] = dict(b1=float(np.mean(best == b1)), b0_stale=float(np.mean(best == b0)), other=float(np.mean((best != b1) & (best != b0))), ties=int(tied.sum()))
+        print(name, res[name], flush=True)
     if kind == "learned":
         We, ybar = EL.emb_fixed(0)
         _, wm, keyf = EP.parts(p, We, ybar, kind)
@@ -30,4 +33,4 @@ for name, kind in (("random_keys_WM", "random"), ("learned_keys_WM", "learned"))
         res[name]["key_norm"] = dict(interact=float(kn[acts == 4].mean()), move=float(kn[acts < 4].mean()), wait=float(kn[acts == 5].mean()))
         lv = np.array(jax.vmap(lambda o, a: wm(o, a)[1])(O[:-1], s0["acts"]))
         res[name]["wm_var_by_patch_mean"] = np.exp(lv).mean(0).round(5).tolist()
-json.dump(res, open(out.replace('.json', '_evidence.json'), "w"), indent=1)
+json.dump(res, open(out.replace('.json', '_fixes.json'), "w"), indent=1)
