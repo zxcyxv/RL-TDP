@@ -13,15 +13,28 @@ plans, arrive = EL.plans_for(sessions)
 b1, b0 = np.array(stack["b1"]), np.array(stack["b0"])
 res = {}
 trained = {}
-for name, kind, use_wm, ev in (("random_keys_noWM", "random", False, False), ("random_keys_WM", "random", True, False), ("learned_keys_WM", "learned", True, False),
-                               ("random_keys_noWM+evidence", "random", False, True), ("random_keys_WM+evidence", "random", True, True), ("learned_keys_WM+evidence", "learned", True, True)):
+for name, kind, use_wm, ev in (("learned_keys_WM", "learned", True, False), ("learned_keys_WM+evidence_eb", "learned", True, True)):
     if (kind, use_wm) not in trained:
         trained[(kind, use_wm)] = EL.train(kind, log=lambda m: print(m, flush=True)) if use_wm else (EL.init(jax.random.PRNGKey(0)), 1.0)
     p, vmax = trained[(kind, use_wm)]
-    one = EL.probe(p, vmax, kind, use_wm, stack, evidence=ev)
-    sc = np.array(jax.jit(jax.vmap(one))(stack, plans, arrive))
-    best = sc.argmax(1)
-    res[name] = dict(b1=float(np.mean(best == b1)), b0_stale=float(np.mean(best == b0)), other=float(np.mean((best != b1) & (best != b0))),
-                     score_b1=float(sc[np.arange(NW), b1].mean()), score_b0=float(sc[np.arange(NW), b0].mean()))
+    vbar = EL.content_var(p, vmax, kind, use_wm) if ev else None
+    if ev:
+        print(name, "v̄ =", round(vbar, 4), flush=True)
+    one = EL.probe(p, vmax, kind, use_wm, stack, evidence=ev, vbar=vbar)
+    sc_all = np.array(jax.jit(jax.vmap(one))(stack, plans, arrive))          # [NW, NSITE, 2]: (B 칸 점수, 예측 보상)
+    res[name] = {}
+    for j, what in enumerate(("slot_B",)):
+        sc = sc_all[..., j]
+        best = sc.argmax(1)
+        res[name][what] = dict(b1=float(np.mean(best == b1)), b0_stale=float(np.mean(best == b0)), other=float(np.mean((best != b1) & (best != b0))),
+                               score_b1=float(sc[np.arange(NW), b1].mean()), score_b0=float(sc[np.arange(NW), b0].mean()))
     print(name, res[name], flush=True)
-json.dump(res, open(out, "w"), indent=1)
+    if kind == "learned" and not ev:                                  # 국면별 키 크기 (교사 세션 하나)
+        We, ybar = EL.emb_fixed(0)
+        _, _, keyf = EL.parts(p, We, ybar, kind)
+        s0 = jax.tree_util.tree_map(lambda x: x[0], stack)
+        O, _, _ = jax.jit(EL.observe_stream)(s0)
+        kn = np.array(jax.vmap(lambda o, a: jax.numpy.linalg.norm(keyf(o, a)))(O[:-1], s0["acts"]))
+        acts = np.array(s0["acts"])
+        print("  키 크기: 상호작용", kn[acts == 4].mean().round(3), "| 이동", kn[acts < 4].mean().round(3), "| 대기", kn[acts == 5].mean().round(3), flush=True)
+json.dump(res, open(out.replace('.json', '_heads.json'), "w"), indent=1)
