@@ -16,6 +16,8 @@
   ours        키 선행 ET e ← α e + k (α = 2^(−1/8)), 정밀도 가중 쓰기 (RLS = 조건부 선형 가우시안 사후, R = 0.01, P₀ = I, c = 1)
   ours_noet   같은 것, α = 0 (ET 없음)
   hebb_et     같은 ET, 모두 쓰는 Hebb M += y eᵀ (정밀도 없음)
+  ours_surp   ours에서 흔적 입력을 행동의 놀라움으로 가중: e ← α e + u_t k_t, u_t = −log p(a_t) (느린 모델의 스텝별 행동 빈도).
+              정해진 행동 (복도의 FWD, 방의 STAY)은 u = 0이라 흔적에 들어가지 않는다. 관측의 놀라움은 넣지 않는다 (관측은 결과, 행동은 원인).
   product     TDP band_product를 토큰 하나·실수 극점 하나로: E_K ← z E_K + γ k, E_V ← z E_V + γ y, M = E_V E_Kᵀ (γ = √(1 − z²))
               z = 2^(−1/8) (짧은 창 = 짧은 보존), product_long은 z = 1 − 1/4096 (긴 보존 = 긴 대칭 창). 토큰 하나라 계수 1이다 (TDP의 계수는 토큰에서 온다)
 """
@@ -52,11 +54,12 @@ def stream(enc, w):
     return K, Y, Kt, E[-1, G.HUD]
 
 
-def write_rls(K, Y, S_, alpha, R=0.01):
+def write_rls(K, Y, S_, alpha, R=0.01, U=None):
+    U = jnp.ones(K.shape[0]) if U is None else U
     def f(c, x):
         M, P, e = c
-        k, y, s = x
-        e = alpha * e + k
+        k, y, s, u = x
+        e = alpha * e + u * k
         x_ = s * e                                                       # 이 스텝에서 빠른 항의 회귀 입력
         a = P @ x_
         S = R + x_ @ a
@@ -64,7 +67,7 @@ def write_rls(K, Y, S_, alpha, R=0.01):
         P = P - jnp.outer(a, a) / S
         return (M, P, e), None
     dk = K.shape[-1]
-    (M, _, _), _ = jax.lax.scan(f, (jnp.zeros((H, dk)), jnp.eye(dk), jnp.zeros(dk)), (K, Y, S_))
+    (M, _, _), _ = jax.lax.scan(f, (jnp.zeros((H, dk)), jnp.eye(dk), jnp.zeros(dk)), (K, Y, S_, U))
     return M
 
 
@@ -91,6 +94,7 @@ def write_product(K, Y, S_, z):
 
 MEMORIES = dict(
     ours=lambda K, Y, S: write_rls(K, Y, S, ALPHA),
+    ours_surp=lambda K, Y, S, U: write_rls(K, Y, S, ALPHA, U=U),
     ours_noet=lambda K, Y, S: write_rls(K, Y, S, 0.0),
     hebb_et=lambda K, Y, S: write_hebb(K, Y, S, ALPHA),
     product=lambda K, Y, S: write_product(K, Y, S, ALPHA),
@@ -112,17 +116,21 @@ def slow_model(enc, d, D, n=4096, gap=0):
     Y = G.TEX[c].reshape(*c.shape, -1) @ enc["We"]                     # 가운데 칸만 [n, T−1, H]
     mu = Y.mean(0)
     v = ((Y - mu) ** 2).mean((0, 2))
-    return mu, jnp.sqrt(v / (v.max() + 1e-12))
+    pa = jax.nn.one_hot(ws.act, G.A).mean(0)                          # 스텝별 행동 빈도 [T−1, A]
+    return mu, jnp.sqrt(v / (v.max() + 1e-12)), pa
 
 
 def evaluate(name, seed, d, D, n=1024, swap=False, gap=0, dk=DK):
     """정확도 A, S_mem = (A − 0.5) / (1 − 0.5). swap=True: 다른 세계의 M으로 읽는다 (기억 교환 개입)."""
     enc = encoder(seed, dk)
-    mu, s = slow_model(enc, d, D, gap=gap)
+    mu, s, pa = slow_model(enc, d, D, gap=gap)
     ws = G.make_worlds(jax.random.PRNGKey(10_000 + seed), n, d, D, gap)
 
     def one(w):                                                          # 세계 하나씩 (긴 대기에서 메모리 절약)
         K, Y, Kt, phi = stream(enc, w)
+        if name == "ours_surp":
+            U = -jnp.log(jnp.take_along_axis(pa, w.act[:, None], 1)[:, 0] + 1e-12)
+            return MEMORIES[name](K, Y - mu, s, U), Kt, phi
         return MEMORIES[name](K, Y - mu, s), Kt, phi
     M, Kt, phi = jax.lax.map(one, ws, batch_size=64)
     if swap:
