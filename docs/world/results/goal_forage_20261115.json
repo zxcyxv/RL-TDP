@@ -1,0 +1,122 @@
+[
+ {
+  "agent": "gru",
+  "it": 250,
+  "sec": 16,
+  "n_new": 1474.0,
+  "n_seen": 7640.0,
+  "rewards": 8.9,
+  "steps_new": 35.381,
+  "steps_seen": 21.585
+ },
+ {
+  "agent": "gru",
+  "it": 500,
+  "sec": 27,
+  "n_new": 1496.0,
+  "n_seen": 9439.0,
+  "rewards": 10.679,
+  "steps_new": 33.584,
+  "steps_seen": 18.195
+ },
+ {
+  "agent": "gru",
+  "it": 750,
+  "sec": 38,
+  "n_new": 1527.0,
+  "n_seen": 12166.0,
+  "rewards": 13.372,
+  "steps_new": 28.968,
+  "steps_seen": 15.042
+ },
+ {
+  "agent": "gru",
+  "it": 1000,
+  "sec": 48,
+  "n_new": 1578.0,
+  "n_seen": 13294.0,
+  "rewards": 14.523,
+  "steps_new": 30.429,
+  "steps_seen": 13.315
+ },
+ {
+  "agent": "gru",
+  "it": 1250,
+  "sec": 59,
+  "n_new": 1533.0,
+  "n_seen": 16390.0,
+  "rewards": 17.503,
+  "steps_new": 27.776,
+  "steps_seen": 11.447
+ },
+ {
+  "agent": "gru",
+  "it": 1500,
+  "sec": 69,
+  "n_new": 1500.0,
+  "n_seen": 17631.0,
+  "rewards": 18.683,
+  "steps_new": 28.387,
+  "steps_seen": 10.513
+ },
+ {
+  "agent": "synapse",
+  "it": 250,
+  "sec": 18,
+  "n_new": 1486.0,
+  "n_seen": 7940.0,
+  "rewards": 9.205,
+  "steps_new": 34.275,
+  "steps_seen": 20.833
+ },
+ {
+  "agent": "synapse",
+  "it": 500,
+  "sec": 30,
+  "n_new": 1486.0,
+  "n_seen": 9569.0,
+  "rewards": 10.796,
+  "steps_new": 32.888,
+  "steps_seen": 17.665
+ },
+ {
+  "agent": "synapse",
+  "it": 750,
+  "sec": 42,
+  "n_new": 1527.0,
+  "n_seen": 11394.0,
+  "rewards": 12.618,
+  "steps_new": 31.784,
+  "steps_seen": 15.184
+ },
+ {
+  "agent": "synapse",
+  "it": 1000,
+  "sec": 54,
+  "n_new": 1546.0,
+  "n_seen": 13141.0,
+  "rewards": 14.343,
+  "steps_new": 30.204,
+  "steps_seen": 13.566
+ },
+ {
+  "agent": "synapse",
+  "it": 1250,
+  "sec": 66,
+  "n_new": 1580.0,
+  "n_seen": 15807.0,
+  "rewards": 16.979,
+  "steps_new": 28.647,
+  "steps_seen": 11.828
+ },
+ {
+  "agent": "synapse",
+  "it": 1500,
+  "sec": 78,
+  "n_new": 1515.0,
+  "n_seen": 18150.0,
+  "rewards": 19.204,
+  "steps_new": 27.312,
+  "steps_seen": 10.312
+ }
+]
