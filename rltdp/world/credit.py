@@ -51,10 +51,11 @@ def fixed(seed=0):
     return keys, feat
 
 
-def synapse_episode(kind, key, N, T, rtypes, seed=0):
-    """학습 없는 시냅스 에이전트 한 에피소드. rtypes [T] 스텝별 보상 자원. 반환: 보상 [T]."""
+def synapse_episode(kind, key, N, T, rtypes, seed=0, keys=None):
+    """학습 없는 시냅스 에이전트 한 에피소드. rtypes [T] 스텝별 보상 자원. keys: 키 함수 (없으면 고정 난수). 반환: 보상 [T]."""
     reset, patches, step = make_env(N)
-    keys, feat = fixed(seed)
+    keys0, feat = fixed(seed)
+    keys = keys or keys0
     HY = V * V * H_EMB
     k0, key = jax.random.split(key)
     st = reset(k0)

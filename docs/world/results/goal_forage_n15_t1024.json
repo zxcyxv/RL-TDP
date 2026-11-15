@@ -1,0 +1,74 @@
+[
+ {
+  "agent": "gru",
+  "N": 15,
+  "T": 1024,
+  "it": 250,
+  "sec": 45,
+  "n_new": 10.0,
+  "n_seen": 3.0,
+  "rewards": 0.025,
+  "steps_new": 8.2,
+  "steps_seen": 2.667
+ },
+ {
+  "agent": "gru",
+  "N": 15,
+  "T": 1024,
+  "it": 500,
+  "sec": 84,
+  "n_new": 15.0,
+  "n_seen": 5.0,
+  "rewards": 0.039,
+  "steps_new": 6.733,
+  "steps_seen": 1.8
+ },
+ {
+  "agent": "gru",
+  "N": 15,
+  "T": 1024,
+  "it": 750,
+  "sec": 124,
+  "n_new": 18.0,
+  "n_seen": 3.0,
+  "rewards": 0.041,
+  "steps_new": 6.333,
+  "steps_seen": 238.0
+ },
+ {
+  "agent": "gru",
+  "N": 15,
+  "T": 1024,
+  "it": 1000,
+  "sec": 163,
+  "n_new": 18.0,
+  "n_seen": 2.0,
+  "rewards": 0.039,
+  "steps_new": 6.167,
+  "steps_seen": 2.0
+ },
+ {
+  "agent": "gru",
+  "N": 15,
+  "T": 1024,
+  "it": 1250,
+  "sec": 202,
+  "n_new": 15.0,
+  "n_seen": 3.0,
+  "rewards": 0.035,
+  "steps_new": 5.733,
+  "steps_seen": 1.0
+ },
+ {
+  "agent": "gru",
+  "N": 15,
+  "T": 1024,
+  "it": 1500,
+  "sec": 242,
+  "n_new": 11.0,
+  "n_seen": 2.0,
+  "rewards": 0.025,
+  "steps_new": 121.909,
+  "steps_seen": 2.0
+ }
+]
