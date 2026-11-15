@@ -22,6 +22,7 @@ N, D_DELAY, NSITE = 11, 8, 5
 A_MOVES = np.array([[0, 1], [0, -1], [1, 0], [-1, 0]])       # 동 서 남 북
 INTERACT, WAIT, NA = 4, 5, 6
 FLOOR0, SITE, DEPOT, ITEM0, CARD_BACK, BLANK, STAMP = 1, 13, 15, 16, 20, 21, 22
+PUBLIC = False                                                  # True: 공개 의뢰 (카드 앞면)
 TEX = E.textures(E.EnvCfg(N=N, V=3, n_types=24))
 
 
@@ -141,7 +142,7 @@ def env_step(s, a, req_now, rid_now, change_now, b0):
     r = (arrive & (arrived_item == new_req) & (stamp == 0)).astype(jnp.float32)
     stamp = jnp.where(r > 0, 1, stamp)
     s2 = dict(s, pos=pos, prod=prod, pending=jnp.where(arrive, -1, item), due=due, t=t, stamp=stamp, req=new_req, rid=rid_now)
-    card = jnp.where(new_req >= 0, CARD_BACK, BLANK)
+    card = jnp.where(new_req >= 0, jnp.where(PUBLIC, ITEM0 + new_req, CARD_BACK), BLANK)   # PUBLIC: 카드에 의뢰한 산출물 그림 (12.6)
     hud_item = jnp.where(arrived_item >= 0, ITEM0 + arrived_item, BLANK)
     hud_stamp = jnp.where(stamp > 0, STAMP, BLANK)
     return s2, obs(s["tiles"], pos, card, hud_item, hud_stamp), r, jnp.where(start, jnp.argmax(at_site), -1)

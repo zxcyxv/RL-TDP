@@ -53,7 +53,7 @@ def write_scan_ckpt(p, We, ybar, kind, vmax, O, acts, stop_t):
     return M, P, e
 
 
-def reuse_nll(p, We, ybar, kind, vmax, sess, plans):
+def reuse_nll(p, We, ybar, kind, vmax, sess, plans, mask=None):
     """세션 하나: 쓰고, 고정한 기억으로 채집처마다 다시 질의한 경로의 관측 예측 NLL (경로 스텝 평균)."""
     feat, wm, key = EP.parts(p, We, ybar, kind)
     O, s_end, _ = EL.observe_stream(sess)
@@ -73,13 +73,14 @@ def reuse_nll(p, We, ybar, kind, vmax, sess, plans):
                 S = EP.R_OBS + z @ Pp @ z
                 err = yp - Mp @ z
                 return 0.5 * (err @ err / S + H * jnp.log(S))
-            return (s2, o2, e), jax.vmap(per_patch)(M, P, sv, y).sum()
+            nl = jax.vmap(per_patch)(M, P, sv, y)
+            return (s2, o2, e), (nl if mask is None else nl * mask).sum()
         _, nll = jax.lax.scan(f, (s_end, O[-1], e), plan)
         return nll.mean()
     return jax.vmap(query)(plans).mean()
 
 
-def train(seed=0, D=256, n_train=256, iters_k=300, B=8, log=print):
+def train(seed=0, D=256, n_train=256, iters_k=300, B=8, log=print, mask=None):
     We, ybar = EL.emb_fixed(seed)
     p, vmax = EP.train("learned", seed=seed, D=D, iters_k=0, log=log)                # 월드 모델만 (칸별 NLL)
     sessions, tr = EL.stack_sessions(range(50_000, 50_000 + n_train), D)
@@ -93,7 +94,7 @@ def train(seed=0, D=256, n_train=256, iters_k=300, B=8, log=print):
         def lf(q):
             pp = dict(p, **q)
             sb = jax.tree_util.tree_map(lambda x: x[idx], tr)
-            return jax.vmap(lambda s, pl: reuse_nll(pp, We, ybar, "learned", vmax, s, pl))(sb, plans[idx]).mean()
+            return jax.vmap(lambda s, pl: reuse_nll(pp, We, ybar, "learned", vmax, s, pl, mask))(sb, plans[idx]).mean()
         l, g = jax.value_and_grad(lf)(q)
         g, st = opt.update(g, st, q)
         return optax.apply_updates(q, g), st, l
@@ -136,3 +137,13 @@ def probe_two(p, vmax, kind, seed=0):
             out.append(jax.vmap(sim)(plans, arrive_idx))
         return jnp.stack(out)
     return one
+
+
+def key_norms(p, sess, seed=0):
+    """행동별 학습된 키 크기 평균 (교사 경로 위)."""
+    We, ybar = EL.emb_fixed(seed)
+    _, _, key = EP.parts(p, We, ybar, "learned")
+    O, _, _ = EL.observe_stream(sess)
+    n = jax.vmap(lambda o, a: jnp.linalg.norm(key(o, a)))(O[:-1], sess["acts"])
+    oh = jax.nn.one_hot(sess["acts"], ER.NA)
+    return (oh * n[:, None]).sum(0), oh.sum(0)
