@@ -152,3 +152,21 @@
 ### R1 과제 정의, 인수인계서 갱신
 - 쓰기 단계를 하나로 (R1: 새로움 × 신뢰도 × 관련성). 과제: 방해 (잡음 / 반복 / 무관한 새것)가 섞인 흐름형 연상 회상 (MQAR의 흐름판), R1-a (잡음·반복) → R1-b (무관한 새것). 단계는 R1~R5
 - `docs/HANDOVER.md`를 R1 구현·실험 기준으로 새로 씀. 루트 `README.md`, `docs/README.md` 갱신
+
+## 2026-11-14
+
+### R1 (`rltdp/memory/`, `docs/memory/r1_results.md`)
+- 흐름형 연상 회상: 값이 단서 없이 바뀌는 흐름에서만 키별 신뢰도 추정 (ours)이 토큰 게이트 (gdn, kdn)를 이긴다. 읽기를 보는 게이트 (gdn_read)도 전체 정확도는 같아진다. 시드 1개
+
+### 방향 결정: R1 → R3 (forage 월드), 사용자 결정
+- MQAR에서 성공한 형태 중 어느 것도 Craftax에서 돌아가는 형태로 그대로 옮길 수 없었다. 그래서 Craftax와 같은 꼴의 입력 (타일 패치 + 행동 + 보상)의 forage 월드에서 R3를 바로 한다
+- 설계가 여기서 성공하면 R4에서 달라지는 것은 난이도와 학습 규모뿐이다. `docs/HANDOVER.md` 0.1절
+
+### forage 월드와 TDP 에이전트 (`rltdp/world/`)
+- 에이전트 synapse / gru / tdp / random / oracle. TDP: RPE 덧셈 게이트는 중간에 회상을 배웠다가 무너짐, 델타 지움을 넣으면 안정적이지만 640반복까지 회상 못 함 (커밋 687674c 메시지, 수치 기록 없음)
+- TDP 스케일 안정화 (Codex): `docs/world/tdp_scale_stability.md`. iter 400에서 중단, found 0.242
+
+### forage 재실행 (`docs/world/README.md` 4절)
+- 이전 기록이 `runs/`에만 있어 사라져서 synapse·gru·tdp를 같은 설정으로 다시 돌림. 평가에 에피소드별 보상 횟수 분포 추가
+- synapse는 학습 전에도 30.4 (oracle 53.4). gru는 결정적 정책으로 탐색이 무너지며 이봉. tdp는 탐색은 유지, 기억 활용이 생겼다 사라짐, 최종 random 수준. 같은 시드의 이전 실행과 궤적이 크게 다름
+- 규칙: 결과는 `docs/<계열>/results/`로 복사해 커밋한다 (`HANDOVER.md` 1절)

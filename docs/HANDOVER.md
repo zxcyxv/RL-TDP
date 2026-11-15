@@ -6,7 +6,15 @@
 - **핵심 가설**: 기억이 새롭고, 믿을 만하고, 관련 있는 입력만 쓰고 (쓰기), 증거가 있을 때만 버리고 (망각), 필요한 것만 읽으면 (읽기), 같은 크기의 기억이 사건 단위로 훨씬 먼 과거까지 쓸모 있게 된다.
 - **틀**: 자유에너지원리와 능동적 추론 (쓰기 = 정밀도 가중 믿음 갱신, 기억 행렬에 대한 칼만 필터). 엔지니어링 뼈대와 비교군은 DreamerV3.
 - **단계**: R1 쓰기 → R2 유지·망각 → R3 읽기 → R4 월드 모델 결합 (Crafter / Craftax) → R5 마인크래프트. 상세는 [`ROADMAP.md`](ROADMAP.md).
-- **지금 할 일**: R1 — 방해가 섞인 흐름형 연상 회상 과제를 만들고, 쓰기 규칙을 비교군과 비교해 입증한다 (4절).
+- **지금 할 일 (2026-11-14 갱신)**: R1은 끝났고 (결과: [`memory/r1_results.md`](memory/r1_results.md)), **R2를 건너뛰고 R3를 forage 월드 (`rltdp/world/`)에서 바로 한다** (0.1절).
+  4절의 R1 계획은 기록으로 남긴다. 현재 작업은 [`world/README.md`](world/README.md).
+
+### 0.1 R1 → R3로 바로 넘어간 이유 (사용자 결정, 2026-11-14)
+
+- R1 (MQAR 흐름판)에서 결과는 나왔지만, Craftax에서 돌아가는 형태로 넣으려 하니 MQAR에서 성공한 형태 중 어느 것도 그대로 옮길 수 없었다.
+- 그래서 Craftax와 같은 꼴의 입력 (타일 단위 이미지 패치 + 행동 + 보상, 행동 4개, 에피소드마다 바뀌는 배치)을 쓰는 작은 과제 (forage 월드)에서 R3를 바로 한다.
+- 모델 설계가 여기서 성공하면 R4 (Craftax)에서 달라지는 것은 실질적으로 **난이도와 학습 규모뿐**이다. 이것이 이 순서의 이점이다.
+- 따라서 forage 월드의 설계 판단 기준은 "Craftax로 그대로 옮길 수 있는 형태인가"다.
 
 ## 1. 설치와 확인
 
@@ -15,7 +23,16 @@ pip install -e .                 # torch ≥ 2.4, gymnasium 1.4.0, minigrid 3.2.
 python -m pytest -q              # 39개 통과 (CPU 약 1분)
 ```
 
-`data/`, `runs/`는 git에 없다. R1~R3은 합성 과제라 데이터가 필요 없다.
+`data/`, `runs/`는 git에 없다. R1은 합성 과제, forage 월드는 JAX 안에서 생성하는 과제라 데이터가 필요 없다.
+
+forage 월드 (`rltdp/world/`)는 JAX다. 별도 환경 `/venv/jax`를 쓴다:
+```bash
+uv venv /venv/jax --python 3.12 && uv pip install --python /venv/jax/bin/python "jax[cuda12]==0.7.2" optax numpy   # RTX 5090에서 확인
+XLA_PYTHON_CLIENT_PREALLOCATE=false /venv/jax/bin/python -m rltdp.world.train --agent synapse --iters 960 --B 40 --L 32 --eval_every 80 --eval_B 1024
+```
+
+**결과는 `runs/`에만 두지 않는다.** `runs/`는 git에 없어서 머신이 바뀌면 사라진다 (11/14 이전 synapse·GRU·TDP 기록이 이렇게 사라져 다시 돌렸다).
+평가 기록 (`*.jsonl`)은 `docs/<계열>/results/<실행 이름>/`으로 복사해 커밋한다. `scripts/world/rerun_20261114.sh`가 그 예다 (5분마다 복사·커밋).
 
 ## 2. 저장소 구조
 
@@ -24,6 +41,8 @@ python -m pytest -q              # 39개 통과 (CPU 약 1분)
 | `rltdp/common/` | 공통: MiniGrid 래퍼 (`minigrid_env.py`), 격자 유틸·MLP (`grid.py`), tdp-reasoner 블록 (`tdp_block.py`), 재현 버퍼 (`replay_buffer.py`) |
 | `rltdp/fep/` | 월드 모델과 능동적 추론 에이전트 구현: 정확한 우도 월드 모델 (조건부 흐름) 대 RSSM-VAE, DreamerV3식 상상 속 actor-critic, 선호분포·기대 자유에너지 actor, novelty (`bandit/`, `flows/`, `wm/`, `agent/`) |
 | `rltdp/btsp/` | TDP 흔적 위의 가소성 규칙으로 학습하는 에이전트 (LavaGap) |
+| `rltdp/memory/` | R1: 흐름형 연상 회상 과제와 쓰기 규칙 비교 (PyTorch). 결과 `docs/memory/r1_results.md` |
+| `rltdp/world/` | **현재 작업 (R3)**: forage 격자 (JAX)와 에이전트 synapse / gru / tdp / random / oracle. [`world/README.md`](world/README.md) |
 | `rltdp/icrl/` | 고정 크기 기억의 토이 실험 (`toy.py`: 충분통계, 망각, 플래토 게이트)과 사전학습 비교 (`arch.py`: 정밀도 가중 플래토 기억, Gated DeltaNet, 문맥 창 Transformer) |
 | `tests/` | 단위 테스트, 이론 검증 |
 | `scripts/` | 실행 스크립트 |
@@ -37,8 +56,9 @@ R1 설계에 직접 쓰이는 근거는 `docs/icrl/icrl_memory_gate.md`에 있�
 - 쓰기 규칙의 출발 형태는 칼만 쓰기 + 관련성 흔적. 자유 파라미터는 실행 전에 고정한다.
 - 주장에는 사전 예측 문서, 시드 여러 개, 가장 단순한 비교군과 가장 강한 비교군 (정답 게이트 상한 포함)을 붙인다.
 - 실패하면 문턱이나 손실을 덧붙이지 않고 요구의 형식화로 돌아간다.
+- (2026-11-14) R1 다음은 R2가 아니라 R3, 과제는 forage 월드 (0.1절).
 
-## 4. 지금 할 일: R1
+## 4. (끝남) R1 계획 — 기록으로 남김. 결과는 `docs/memory/r1_results.md`
 
 ### 4.1 구현
 
