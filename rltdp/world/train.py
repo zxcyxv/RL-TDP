@@ -24,12 +24,15 @@ def make(name, cfg, mc, tex):
     if name == "tdp":
         from .tdp_agent import make_tdp
         return make_tdp(cfg, mc, tex)
+    if name == "tdpc":
+        from .tdp_credit import make_tdp_credit
+        return make_tdp_credit(cfg, mc, tex)
     return _make(name, cfg, mc, tex)
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--agent", choices=["synapse", "tdp", "gru", "random", "oracle"], required=True)
+    ap.add_argument("--agent", choices=["synapse", "tdp", "tdpc", "gru", "random", "oracle"], required=True)
     ap.add_argument("--iters", type=int, default=2000, help="에피소드 묶음 수 (묶음 하나 = 환경 B개 × T스텝)")
     ap.add_argument("--B", type=int, default=512)
     ap.add_argument("--L", type=int, default=64)
@@ -115,7 +118,7 @@ def main():
         if it % args.eval_every == 0 or it == args.iters:
             rec = dict(it=it, steps=it * args.B * cfg.T, sec=round(time.time() - t0), loss=round(float(loss), 4),
                        **{"tr_" + k: round(float(v), 4) for k, v in m.items() if k != "r"}, **fmt(evaluate(params, jax.random.PRNGKey(10_000))))
-            for k in ("log_tau", "logit_bs", "logit_eta"):
+            for k in ("log_tau", "logit_bs", "logit_eta", "logit_beta"):
                 if k in params:
                     rec[k] = round(float(params[k]), 3)
             log.write(json.dumps(rec) + "\n"); log.flush()

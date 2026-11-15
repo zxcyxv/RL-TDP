@@ -123,9 +123,10 @@ def make_tdp(cfg: E.EnvCfg, mc=None, tex=None, d=128, heads=4, bands=4, periods=
         z = jnp.zeros((H, T, 2, R, D))
         return dict(st=st, o=E.patches(st, tex, cfg), r=jnp.zeros(()), ek=z, ev=z, W=jnp.zeros((H, D, D)))
 
-    def forward(p, c, a, r=None):
+    def forward(p, c, a, r=None, hidden=False):
         """장면 c["o"], 행동 a, 보상 토큰으로 블록을 한 번 돈다. 반환: 예측과 그때의 새 흔적.
-        r=None이면 읽기 (행동을 고르기 전, 보상 토큰은 "아직 모름"), r이 주어지면 쓰기 (그 행동의 결과로 받은 보상)."""
+        r=None이면 읽기 (행동을 고르기 전, 보상 토큰은 "아직 모름"), r이 주어지면 쓰기 (그 행동의 결과로 받은 보상).
+        a가 행동 수와 같으면 p["act"]의 마지막 행 ("아직 안 고름")을 쓴다 (tdp_credit). hidden=True면 보상 토큰의 최종 출력을 덧붙인다."""
         rew = p["rmask"] if r is None else r * p["wr"] + p["br"]
         tok = jnp.concatenate([c["o"] @ p["Wp"] + p["bp"], p["act"][a][None], rew[None]])
         u = h0 + math.sqrt(d) * tok
@@ -133,7 +134,8 @@ def make_tdp(cfg: E.EnvCfg, mc=None, tex=None, d=128, heads=4, bands=4, periods=
             u = block(bp, u)[0]
         u, ek, ev, nov, ms = block(p["mem"], u, c["ek"], c["ev"], c["W"] if gate else None)   # 기억 블록: 시냅스를 읽고 쓴다
         head = u[TOK_REW] @ p["Whead"] + p["bhead"]
-        return u[:n_patch] @ p["Wout"] + p["bout"], head[0], head[1], ek, ev, nov, ms
+        out = (u[:n_patch] @ p["Wout"] + p["bout"], head[0], head[1], ek, ev, nov, ms)
+        return out + (u[TOK_REW],) if hidden else out
 
     def features(p, c, a):
         """진단용. 쓰기 직전 시냅스 M [H, D, D], 기억 블록에 들어가는 보상 토큰 벡터, 모델의 질의로 M을 읽은 값, 보상 토큰의 최종 출력."""
