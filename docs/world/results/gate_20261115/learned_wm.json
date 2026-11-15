@@ -1,0 +1,110 @@
+[
+ {
+  "keys": "learned_wm",
+  "seed": 0,
+  "d": 4,
+  "D": 32,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 9.113,
+   "corridor": 7.95,
+   "room": 7.487
+  }
+ },
+ {
+  "keys": "learned_wm",
+  "seed": 0,
+  "d": 4,
+  "D": 256,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 9.113,
+   "corridor": 7.95,
+   "room": 7.487
+  }
+ },
+ {
+  "keys": "learned_wm",
+  "seed": 0,
+  "d": 4,
+  "D": 2048,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 9.113,
+   "corridor": 7.95,
+   "room": 7.487
+  }
+ },
+ {
+  "keys": "learned_wm",
+  "seed": 1,
+  "d": 4,
+  "D": 32,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 4.21,
+   "corridor": 3.786,
+   "room": 2.869
+  }
+ },
+ {
+  "keys": "learned_wm",
+  "seed": 1,
+  "d": 4,
+  "D": 256,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 4.21,
+   "corridor": 3.786,
+   "room": 2.869
+  }
+ },
+ {
+  "keys": "learned_wm",
+  "seed": 1,
+  "d": 4,
+  "D": 2048,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 4.21,
+   "corridor": 3.786,
+   "room": 2.869
+  }
+ },
+ {
+  "keys": "learned_wm",
+  "seed": 2,
+  "d": 4,
+  "D": 32,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 6.637,
+   "corridor": 5.934,
+   "room": 5.551
+  }
+ },
+ {
+  "keys": "learned_wm",
+  "seed": 2,
+  "d": 4,
+  "D": 256,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 6.637,
+   "corridor": 5.934,
+   "room": 5.551
+  }
+ },
+ {
+  "keys": "learned_wm",
+  "seed": 2,
+  "d": 4,
+  "D": 2048,
+  "S": 1.0,
+  "key_norms": {
+   "junction": 6.637,
+   "corridor": 5.934,
+   "room": 5.551
+  }
+ }
+]

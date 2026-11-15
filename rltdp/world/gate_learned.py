@@ -8,6 +8,9 @@
   learned   k_t = MLP([flatten(emb(o_t)), onehot(a_t)]) (느린 가중치, 크기 정규화 없음: 무엇을 얼마나 흔적에 넣을지 스스로 배운다)
 학습: 같은 세계에서 대기 뒤 무작위 문을 다시 방문하는 세션 (D ∈ {8, 16, 32}). 재방문 갈림길의 HUD에는 무작위 자원.
      손실 = 재방문 결과의 편차를 시냅스로 예측한 오차 (그때 M은 노출에서 쓴 것). 세션 전체 BPTT.
+  learned_wm  learned 키 + 이상적 느린 모델 대신 학습된 월드 모델: (장면, 행동) → 다음 결과의 평균 μ⁰와 분산 v (스칼라),
+              여러 세계에 걸친 가우시안 음의 로그우도 (F의 정확도 항)로 먼저 학습한 뒤 고정. 쓰기 세기 s = √(v / v̄), v̄ = 학습 자료의 v 최대.
+              스텝 번호를 모르므로 "첫째 자원 뒤 갈림길 / 둘째 자원 뒤 방"을 구별하지 못한다 (그 스텝에 잘못된 쓰기가 생길 수 있다).
 평가 (원래 과제): 후보 a마다 그 문으로 걸어 들어갈 때 생길 흔적 e(a)로 읽는다: ŷ(a) = M (s* e(a)), 점수 cos(ŷ(a), φ − μ̄).
      복도 장면은 두 문이 같고 결정적이라 느린 모델이 안다고 둔다.
 """
@@ -52,10 +55,60 @@ def init(key):
                 W2=jax.random.normal(k2, (HID, DK)) / jnp.sqrt(HID), b2=jnp.zeros(DK))
 
 
+def wm_init(key):
+    k1, k2 = jax.random.split(key)
+    return dict(W1=jax.random.normal(k1, (49 * GM.H + G.A, HID)) / jnp.sqrt(49.0 * GM.H), b1=jnp.zeros(HID),
+                W2=jax.random.normal(k2, (HID, GM.H + 1)) * 0.1 / jnp.sqrt(HID), b2=jnp.zeros(GM.H + 1))
+
+
+def wm_apply(q, enc, ids, a):
+    """다음 결과의 평균 [H]와 로그 분산 (스칼라)."""
+    x = jnp.concatenate([GM.emb(enc, ids).reshape(-1), jax.nn.one_hot(a, G.A)])
+    out = jax.nn.relu(x @ q["W1"] + q["b1"]) @ q["W2"] + q["b2"]
+    return out[:GM.H], out[GM.H]
+
+
+def train_wm(seed, enc, d=4, iters=1500, B=64, lr=1e-3, log=print):
+    q = wm_init(jax.random.PRNGKey(77 + seed))
+    opt = optax.adam(lr)
+    st = opt.init(q)
+
+    def nll(q, ids, act):
+        Y = GM.emb(enc, ids[:, 1:])[..., G.CENTER, :]
+        mu, lv = jax.vmap(jax.vmap(lambda o, a: wm_apply(q, enc, o, a)))(ids[:, :-1], act)
+        return jnp.mean(0.5 * (((Y - mu) ** 2).sum(-1) * jnp.exp(-lv) + GM.H * lv))
+
+    def make_upd(D):
+        @jax.jit
+        def upd(q, st, ids, act):
+            l, g = jax.value_and_grad(nll)(q, ids, act)
+            g, st = opt.update(g, st, q)
+            return optax.apply_updates(q, g), st, l
+        return upd
+    upd = {D: make_upd(D) for D in (8, 16, 32)}
+    key = jax.random.PRNGKey(3000 + seed)
+    for it in range(iters):
+        key, k = jax.random.split(key)
+        D = (8, 16, 32)[it % 3]
+        ids, act = jax.vmap(lambda kk: revisit_world(kk, d, D))(jax.random.split(k, B))
+        q, st, l = upd[D](q, st, ids, act)
+        if it % 500 == 0 or it == iters - 1:
+            log(f"  [world model seed {seed}] it {it} nll {float(l):.3f}")
+    ids, act = jax.vmap(lambda kk: revisit_world(kk, d, 32))(jax.random.split(jax.random.PRNGKey(9), 256))
+    _, lv = jax.vmap(jax.vmap(lambda o, a: wm_apply(q, enc, o, a)))(ids[:, :-1], act)
+    return q, float(jnp.exp(lv).max())
+
+
+def wm_stats(q, vmax, enc, ids, act):
+    """세션 하나의 스텝별 μ⁰ [T−1, H], s [T−1] (학습된 월드 모델)."""
+    mu, lv = jax.vmap(lambda o, a: wm_apply(q, enc, o, a))(ids[:-1], act)
+    return mu, jnp.sqrt(jnp.exp(lv) / vmax)
+
+
 def keys_fn(kind, enc):
     def k(p, ids, a):
         e = GM.emb(enc, ids)
-        if kind == "learned":
+        if kind in ("learned", "learned_wm"):
             x = jnp.concatenate([e.reshape(-1), jax.nn.one_hot(a, G.A)])
             return jax.nn.relu(x @ p["W1"] + p["b1"]) @ p["W2"] + p["b2"]
         return GM.key(enc, e, a)
@@ -87,27 +140,37 @@ def train(seed, kind="learned", d=4, iters=2000, B=64, lr=1e-3, log=print):
     enc = GM.encoder(seed)
     kf = keys_fn(kind, enc)
     p = init(jax.random.PRNGKey(seed))
-    if kind != "learned":
+    if kind not in ("learned", "learned_wm"):
         return p, enc, kf
+    if kind == "learned_wm":
+        q, vmax = train_wm(seed, enc, d, log=log)
+        p["wm"], p["vmax"] = jax.lax.stop_gradient(q), vmax
     stats = {}
     for D in (8, 16, 32):
         ids, act = jax.vmap(lambda k: revisit_world(k, d, D))(jax.random.split(jax.random.PRNGKey(555 + D), 2048))
         stats[D] = slow_stats(enc, ids, act)
+    keyp = {k: p[k] for k in ("W1", "b1", "W2", "b2")}
     opt = optax.chain(optax.clip_by_global_norm(1.0), optax.adam(lr))
-    st = opt.init(p)
+    st = opt.init(keyp)
 
-    def loss_fn(p, ids, act, D):
-        mu, s, _ = stats[D]
+    def loss_fn(pp, ids, act, D):
         u = jnp.ones(act.shape[1])
-        _, (err, _) = jax.vmap(lambda i, a: run(p, kf, enc, i, a, mu, s, u))(ids, act)
+        if kind == "learned_wm":
+            def one(i, a):
+                mu, s = wm_stats(p["wm"], p["vmax"], enc, i, a)
+                return run(pp, kf, enc, i, a, mu, s, u)[1][0]
+            err = jax.vmap(one)(ids, act)
+        else:
+            mu, s, _ = stats[D]
+            _, (err, _) = jax.vmap(lambda i, a: run(pp, kf, enc, i, a, mu, s, u))(ids, act)
         return err[:, -1].mean()
 
     def make_upd(D):
         @jax.jit
-        def upd(p, st, ids, act):
-            l, g = jax.value_and_grad(loss_fn)(p, ids, act, D)
-            g, st = opt.update(g, st, p)
-            return optax.apply_updates(p, g), st, l
+        def upd(kp, st, ids, act):
+            l, g = jax.value_and_grad(loss_fn)(kp, ids, act, D)
+            g, st = opt.update(g, st, kp)
+            return optax.apply_updates(kp, g), st, l
         return upd
     upd = {D: make_upd(D) for D in stats}
     key = jax.random.PRNGKey(1000 + seed)
@@ -115,21 +178,30 @@ def train(seed, kind="learned", d=4, iters=2000, B=64, lr=1e-3, log=print):
         key, k = jax.random.split(key)
         D = (8, 16, 32)[it % 3]
         ids, act = jax.vmap(lambda kk: revisit_world(kk, d, D))(jax.random.split(k, B))
-        p, st, l = upd[D](p, st, ids, act)
+        keyp, st, l = upd[D](keyp, st, ids, act)
         if it % 500 == 0 or it == iters - 1:
             log(f"  [{kind} seed {seed}] it {it} revisit loss {float(l):.4f}")
+    p.update(keyp)
     return p, enc, kf
 
 
 def evaluate(p, enc, kf, kind, seed, d, D, n=1024):
     """S_mem, 그리고 노출 중 스텝 종류별 평균 키 노름 (갈림길 / 복도 / 방)."""
     ws = G.make_worlds(jax.random.PRNGKey(10_000 + seed), n, d, D)
-    mu, s, pa = GM.slow_model(enc, d, D)
-    mbar = (mu * s[:, None]).sum(0) / s.sum()
-    s_star = s.max()
+    mu0, s0, pa = GM.slow_model(enc, d, D)
+    mbar = (mu0 * s0[:, None]).sum(0) / s0.sum()
+    s_star = s0.max()
     corr = [G.scene(G.BG[f"corr{j}"], G.CORR, G.HUD_BLANK) for j in range(d - 1)]
 
+    if kind == "learned_wm":
+        mu_end, lv_end = wm_apply(p["wm"], enc, corr[-1], G.FWD)                 # 복도 마지막 칸에서 앞으로: 문 뒤 결과의 평균·분산
+        mbar, s_star = mu_end, jnp.sqrt(jnp.exp(lv_end) / p["vmax"])
+
     def one(w):
+        if kind == "learned_wm":
+            mu, s = wm_stats(p["wm"], p["vmax"], enc, w.ids, w.act)
+        else:
+            mu, s = mu0, s0
         u = -jnp.log(jnp.take_along_axis(pa, w.act[:, None], 1)[:, 0] + 1e-12) if kind == "surp" else jnp.ones(w.act.shape[0])
         (M, P, e), (_, kn) = run(p, kf, enc, w.ids, w.act, mu, s, u)
 
