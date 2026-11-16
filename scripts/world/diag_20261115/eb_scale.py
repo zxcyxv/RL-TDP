@@ -4,6 +4,7 @@
 #   12.7과 같은 판정 (난수 키, 주소 [e; k], C 도착 뒤 쓰기 없음, 시드 1, 세계 256개).
 # 환경변수 POLES (흔적 극의 반감기, 쉼표, 0 = 지금 키; 기본 0,8 = 12.7의 [k; e]), KD (키 차원, 기본 128; 앞 KD성분을 다시 정규화).
 # argv: [mode]  const = 칸별 상수 σ_p (기본) / wm = σ_p(o, a) = c_p √v_p(o, a) (월드 모델 분산 × 칸별 상수)
+#               net = σ_p(x) = exp(½ f_p(x)), f: 주소 x → 12, 은닉 64 SiLU (docs/world/sigma_x_predictions.md). SAVE=경로면 맞춘 매개변수 저장
 import sys, json; sys.path.insert(0, '/workspace/RL-TDP')
 import jax, jax.numpy as jnp, numpy as np, optax
 from rltdp.world import errand as ER, errand_learned as EL, errand_prec as EP, errand_reuse as RU
@@ -25,7 +26,10 @@ phi = (ER.TEX[ER.ITEM0:ER.ITEM0 + 3].reshape(3, -1) @ We) - ybar
 gB = phi[1] - phi.mean(0)
 
 
-def sig(h, o, a):
+def sig(h, o, a, x):
+    if MODE == "net":
+        n = h["net"]
+        return jnp.exp(0.5 * (jax.nn.silu(x @ n["W1"] + n["b1"]) @ n["W2"] + n["b2"]))
     if MODE == "wm":
         _, lv = wm(o, a)
         return jnp.exp(0.5 * (h["ls"] + lv))
@@ -55,7 +59,7 @@ def write_mult(h, O, acts, stop_t):
         k = key(o, a)
         e = AL[:, None] * e + k
         mu, _ = wm(o, a)
-        s = sig(h, o, a)
+        s = sig(h, o, a, e.reshape(-1))
         r = feat(o2) - mu
 
         def pp(Mp, Sp, sp, rp, Rp, lp):
@@ -101,7 +105,7 @@ def write(h, O, acts, stop_t):
         k = key(o, a)
         e = AL[:, None] * e + k
         mu, _ = wm(o, a)
-        s = sig(h, o, a)
+        s = sig(h, o, a, e.reshape(-1))
         r = feat(o2) - mu
 
         def pp(Mp, Pp, sp, rp, Rp, Qp):
@@ -121,6 +125,10 @@ def write(h, O, acts, stop_t):
 # ---- 경험적 베이즈: 학습 세계의 교사 세션 전체의 순차 예측 NLL
 _, tr = EL.stack_sessions(range(50_000, 50_000 + 256), 256)
 h = dict(ls=jnp.zeros(EP.NP), lr=jnp.full(EP.NP, jnp.log(0.01)))
+if MODE == "net":
+    h.pop("ls")
+    h["net"] = dict(W1=jax.random.normal(jax.random.PRNGKey(7), (DZ, 64)) / np.sqrt(DZ), b1=jnp.zeros(64),
+                    W2=jnp.zeros((64, EP.NP)), b2=jnp.zeros(EP.NP))       # 출력 0 → 처음 σ² = 1 (ls = 0과 같음)
 if os.environ.get('QN', '0') == '1':
     h['lq'] = jnp.full(EP.NP, jnp.log(1e-3))
 if FORGET == 'mult':
@@ -130,7 +138,11 @@ HFROM = os.environ.get('HFROM')
 if HFROM:
     prev = json.loads(open(HFROM).read().strip().splitlines()[-1])
     h = dict(ls=jnp.log(jnp.array(prev["sigma2"])), lr=jnp.log(jnp.array(prev["R"])))
-opt = optax.adam(0.05)
+if MODE == "net" and os.environ.get('INIT1213') == '1':                    # 출발점 = 12.13 (상수 σ, R, q)
+    p13 = json.loads(open('/workspace/RL-TDP/docs/world/results/errand_diag_20261115b/eb_process_noise.log').read().strip().splitlines()[-1])
+    h["net"]["b2"] = jnp.log(jnp.array(p13["sigma2"])); h["lr"] = jnp.log(jnp.array(p13["R"])); h["lq"] = jnp.log(jnp.array(p13["q"]))
+ITERS = int(os.environ.get('ITERS', 200))
+opt = optax.adam(float(os.environ.get('LR', 0.05)))
 st = opt.init(h)
 
 
@@ -149,14 +161,35 @@ def upd(h, st, idx):
 
 
 rk = jax.random.PRNGKey(5)
-for it in range(0 if HFROM else 200):
+for it in range(0 if HFROM else ITERS):
     rk, k = jax.random.split(rk)
     h, st, l = upd(h, st, jax.random.randint(k, (8,), 0, 256))
-    if it % 25 == 0 or it == 199:
+    if it % 25 == 0 or it == ITERS - 1:
         print(f"[EB {MODE}] it {it} nll {float(l):.1f}", flush=True)
         if not np.isfinite(float(l)):
-            print("nan: stop", {k: np.array(v).round(3).tolist() for k, v in h.items()}, flush=True); sys.exit(1)
-print("sigma^2_p", np.round(np.exp(np.array(h["ls"])), 4).tolist())
+            print("nan: stop", {k: (np.array(v).round(3).tolist() if not isinstance(v, dict) else "net") for k, v in h.items()}, flush=True); sys.exit(1)
+print("sigma^2_p", np.round(np.exp(np.array(h["ls"])), 4).tolist() if "ls" in h else "net")
+# 성립 확인: 학습 세계 64개 고정 집합의 전체 NLL (이 h 대 12.13 상수)
+@jax.jit
+def full_nll(hh, sb):
+    def one_(sess):
+        O, _, _ = EL.observe_stream(sess)
+        _, (nll, _) = write(hh, O, sess["acts"], 10 ** 9)
+        return nll.sum()
+    return jax.vmap(one_)(sb).sum()
+fixed64 = jax.tree_util.tree_map(lambda x: x[:64], tr)
+NLL_FIT = float(full_nll(h, fixed64))
+NLL_1213 = None
+if MODE == "net":
+    p13 = json.loads(open('/workspace/RL-TDP/docs/world/results/errand_diag_20261115b/eb_process_noise.log').read().strip().splitlines()[-1])
+    h13 = dict(lr=jnp.log(jnp.array(p13["R"])), lq=jnp.log(jnp.array(p13["q"])),
+               net=dict(h["net"], W2=jnp.zeros_like(h["net"]["W2"]), b2=jnp.log(jnp.array(p13["sigma2"]))))
+    NLL_1213 = float(full_nll(h13, fixed64))
+print("full NLL (64 training worlds): fit", NLL_FIT, " 12.13 constant", NLL_1213, flush=True)
+if os.environ.get('SAVE'):
+    flat = {f"{k}/{kk}" if isinstance(v, dict) else k: np.array(vv if isinstance(v, dict) else v)
+            for k, v in h.items() for kk, vv in (v.items() if isinstance(v, dict) else [(None, v)])}
+    np.savez(os.environ['SAVE'], **flat)
 print("q_p      ", np.round(np.exp(np.array(h["lq"])), 6).tolist() if "lq" in h else None)
 print("R_p      ", np.round(np.exp(np.array(h["lr"])), 5).tolist(), flush=True)
 if "lt" in h:
@@ -176,6 +209,14 @@ def one(sess, plans, ai_all):
     blank = feat(ER.TEX[jnp.full(12, ER.BLANK)].reshape(12, -1))[EP.SLOT]
     arrived = ~jnp.all(jnp.isclose(Y, blank, atol=1e-5), -1)
     (M, P, e), (_, got) = write(h, O, sess["acts"], t_c)
+
+    def fx(e_, inp):
+        o_, a_ = inp
+        e_ = AL[:, None] * e_ + key(o_, a_)
+        return e_, sig(h, o_, a_, e_.reshape(-1))[EP.SLOT] ** 2
+    _, s2 = jax.lax.scan(fx, jnp.zeros((len(HL), KD)), (O[:-1], sess["acts"]))
+    s2_arr = jnp.sum(jnp.where(arrived, s2, 0)) / jnp.maximum(arrived.sum(), 1)
+    s2_not = jnp.sum(jnp.where(~arrived, s2, 0)) / jnp.maximum((~arrived).sum(), 1)
     got_mean = jnp.sum(jnp.where(arrived, got, 0)) / jnp.maximum(arrived.sum(), 1)
 
     def sim(plan, ai):
@@ -183,20 +224,22 @@ def one(sess, plans, ai_all):
             s, o, e = c
             k = key(o, a)
             e = AL[:, None] * e + k
-            yh = M[EP.SLOT] @ (sig(h, o, a)[EP.SLOT] * e.reshape(-1))
+            yh = M[EP.SLOT] @ (sig(h, o, a, e.reshape(-1))[EP.SLOT] * e.reshape(-1))
             s2, o2, _, _ = ER.env_step(s, a, jnp.array(1), sess["rid"][-1], jnp.array(False), sess["b0"])
             return (s2, o2, e), yh
         _, YH = jax.lax.scan(f, (s_end, O[-1], e), plan)
         yh = YH[ai]
         return (yh @ gB) / (jnp.linalg.norm(yh) * jnp.linalg.norm(gB) + 1e-8), jnp.linalg.norm(yh)
     sc, nrm = jax.vmap(sim)(plans, ai_all)
-    return sc, nrm, got_mean
+    return sc, nrm, got_mean, s2_arr, s2_not
 
 
-sc, nrm, got = jax.jit(jax.vmap(one))(stack, plans, arrive)
+sc, nrm, got, s2a, s2n = jax.jit(jax.vmap(one))(stack, plans, arrive)
 x = np.array(sc)
 best = (x + 1e-9 * np.random.default_rng(0).random(x.shape)).argmax(1)
-res = dict(mode=MODE, poles=HL, kd=KD, sigma2=np.exp(np.array(h["ls"])).tolist(), R=np.exp(np.array(h["lr"])).tolist(), q=(np.exp(np.array(h["lq"])).tolist() if "lq" in h else None),
+res = dict(mode=MODE, poles=HL, kd=KD, sigma2=(np.exp(np.array(h["ls"])).tolist() if "ls" in h else None),
+           nll64_fit=NLL_FIT, nll64_1213=NLL_1213, iters=ITERS,
+           slot_sigma2_arrival=float(np.mean(s2a)), slot_sigma2_other=float(np.mean(s2n)), R=np.exp(np.array(h["lr"])).tolist(), q=(np.exp(np.array(h["lq"])).tolist() if "lq" in h else None),
            forget=FORGET, hfrom=HFROM,
            one_minus_lam=(np.array(jax.nn.sigmoid(-h["lt"])).tolist() if "lt" in h else None),
            window=((1 / np.array(jax.nn.sigmoid(-h["lt"]))).tolist() if "lt" in h else None),
