@@ -9,3 +9,4 @@
 | **world** | **현재 작업 (R3)**: forage 격자, synapse / gru / tdp 에이전트 | [`world/README.md`](world/README.md), [`world/tdp_scale_stability.md`](world/tdp_scale_stability.md) |
 | **memory** | R1: 흐름형 연상 회상과 쓰기 규칙 | [`memory/r1_results.md`](memory/r1_results.md) |
 | **icrl** | 고정 크기 기억: 충분통계, 망각, 플래토 게이트, 사전학습 비교 (R1·R2 설계의 근거) | [`icrl/icrl_memory_gate.md`](icrl/icrl_memory_gate.md) |
+| **consolidation** | 해마–신피질 공고화 문헌 (수학 모형, 강화학습 적용, 잔차 방향)과 칼만 시냅스 대응, 공고화 토이 | [`consolidation/README.md`](consolidation/README.md) |
