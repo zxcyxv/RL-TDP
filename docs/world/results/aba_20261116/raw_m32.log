@@ -1,0 +1,12 @@
+batch 1/8  T 6412
+batch 2/8  T 6372
+batch 3/8  T 6346
+batch 4/8  T 6368
+batch 5/8  T 6376
+batch 6/8  T 6404
+batch 7/8  T 6418
+batch 8/8  T 6316
+m 32 store 1 raw  synapse_only       tries 2.598  first 0.281  hist [72, 60, 51, 45, 28]
+m 32 store 1 raw  combined           tries 1.559  first 0.656  hist [168, 47, 31, 6, 4]
+m 32 store 1 raw  store_only         tries 1.379  first 0.762  hist [195, 32, 24, 3, 2]
+{"m": 32, "store": true, "smode": "raw", "rounds": 2, "T": [6412, 6372, 6346, 6368, 6376, 6404, 6418, 6316], "sigma2": 0.00387397245503962, "R": 0.0008939065155573189, "q": 1.8077160348184407e-05, "DF": 1024, "eta_a": 0.05, "eta_s": 0.05, "K": 64, "n": 5, "synapse_only": {"tries": 2.59765625, "first": 0.28125, "tries_hist": [72, 60, 51, 45, 28]}, "combined": {"tries": 1.55859375, "first": 0.65625, "tries_hist": [168, 47, 31, 6, 4]}, "store_only": {"tries": 1.37890625, "first": 0.76171875, "tries_hist": [195, 32, 24, 3, 2]}, "shares": {"before_final_sleep": {"synapse": 0.0634879618883133, "store": 0.11935342103242874}, "after_final_sleep": {"synapse": 0.06204378232359886, "store": 0.12059979885816574}}}

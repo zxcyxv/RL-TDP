@@ -5,6 +5,11 @@
 #   첫 보상까지 시도 수 = 점수 내림차순에서 C 채집처의 순위 (기억 없음 = 3.0).
 #   기억은 12.16 (cr_replay.py, 더하는 Q) 그대로: σ², R, q는 12.13 도착 칸 값, φ 1024, η_a = η_s = 0.05, K = 64, n = 5, 판정 직전 잠 한 번. 도착 칸만 계산.
 # argv: m (B 구역 수). 환경변수 STORE=0: 저장소·잠 없음 (시냅스만, m 정하기용).
+# 환경변수 SMODE (진단, 용량 대 망각):
+#   belief (기본) = 12.16 그대로, 잠의 목표 = 시냅스 몫 M_t z_j
+#   raw   = 날것 재생: 버퍼에 r_j도 두고 잠에서 S ← S + η_s (r_j − S φ_j) φ_jᵀ (토이의 raw+replay, 시냅스 cr은 그대로)
+#   ridge = 용량 상한: 깨어 있을 때·잠의 S 학습 없이, 세션 전체 (φ_j, r_j)로 S* = Rᵀ Φ (ΦᵀΦ + λI)⁻¹를 한 번에 풀어 읽음.
+#           λ ∈ RIDGE_L 모두 잰다 (상한이라 가장 좋은 λ를 본다)
 import sys, json, os; sys.path.insert(0, '/workspace/RL-TDP')
 import jax, jax.numpy as jnp, numpy as np
 from rltdp.world import errand as ER, errand_learned as EL, errand_prec as EP
@@ -22,8 +27,12 @@ M_B = int(sys.argv[1])
 STORE = os.environ.get('STORE', '1') == '1'
 ROUNDS = 2
 DF, ETA_A, ETA_S, K, NPASS = 1024, 0.05, 0.05, 64, 5
+SMODE = os.environ.get('SMODE', 'belief')
+RIDGE_L = [1e-3, 1e-2, 1e-1, 1.0]
 if not STORE:
     ETA_A = ETA_S = 0.0
+if SMODE == 'ridge':
+    ETA_A = 0.0
 prev = json.loads(open('/workspace/RL-TDP/docs/world/results/errand_diag_20261115b/eb_process_noise.log').read().strip().splitlines()[-1])
 SG = float(np.sqrt(prev["sigma2"][SL])); RP = float(prev["R"][SL]); QP = float(prev["q"][SL])
 WPHI = jax.random.normal(jax.random.PRNGKey(20261116), (DF, DZ)) / np.sqrt(DZ)
@@ -119,7 +128,7 @@ def memory_and_judge(Kk, Rr, arr, sessA, plans, ai_all, rk):
             perm = jax.random.permutation(kk, TP)
 
             def st(S, j):
-                err = U[j] - S @ V[j]
+                err = (Rp_[j] - S @ Phip[j]) if SMODE == 'raw' else (U[j] - S @ V[j])
                 return S + jnp.where(mask[j], ETA_S, 0.0) * jnp.outer(err, Phip[j]), None
             return jax.lax.scan(st, S, perm)[0], None
         return jax.lax.scan(one_pass, S, jax.random.split(k, NPASS))[0]
@@ -139,7 +148,7 @@ def memory_and_judge(Kk, Rr, arr, sessA, plans, ai_all, rk):
     def chunk(c, ci):
         sl = lambda A: jax.lax.dynamic_slice_in_dim(A, ci * K, K)
         c, _ = jax.lax.scan(awake, c, (sl(Zp), sl(Phip), sl(Rp_), sl(Wp)))
-        if STORE:
+        if STORE and SMODE != 'ridge':
             Mr, P, Mphi, S = c
             S = sleep(S, Mr, Mphi, ci * K + K, jax.random.fold_in(rk, ci))
             c = (Mr, P, Mphi, S)
@@ -148,9 +157,16 @@ def memory_and_judge(Kk, Rr, arr, sessA, plans, ai_all, rk):
     c0 = (jnp.zeros((EP.H, DZ)), jnp.eye(DZ), jnp.zeros((DF, DZ)), jnp.zeros((EP.H, DF)))
     (Mr, P, Mphi, S), _ = jax.lax.scan(chunk, c0, jnp.arange(NC))
     sh_before = shares(Mr, Mphi, S, TP)
-    if STORE:
+    if STORE and SMODE != 'ridge':
         S = sleep(S, Mr, Mphi, TP, jax.random.fold_in(rk, 10_000))       # 복귀 판정 직전 잠
     sh_after = shares(Mr, Mphi, S, TP)
+    if SMODE == 'ridge':
+        W = Wp[:, None]
+        Pw, Rw = Phip * W, Rp_ * W
+        G = Pw.T @ Pw
+        Ss = jnp.stack([jnp.linalg.solve(G + l * jnp.eye(DF), Pw.T @ Rw).T for l in RIDGE_L])   # (L, 8, DF)
+    else:
+        Ss = S[None]
 
     s0, o0 = EL.env0(sessA)
 
@@ -160,20 +176,21 @@ def memory_and_judge(Kk, Rr, arr, sessA, plans, ai_all, rk):
             e = AL[:, None] * e + key(o, a)
             x = e.reshape(-1); z = SG * x; ph = phif(x)
             Mz = Mr @ z; Mpz = Mphi @ z
-            out = jnp.stack([Mz, Mz + S @ (ph - Mpz), S @ ph])            # 시냅스만, 합친 기억, 저장소만
+            out = jnp.concatenate([Mz[None], jnp.einsum('lhd,d->lh', Ss, ph - Mpz) + Mz, jnp.einsum('lhd,d->lh', Ss, ph)])   # 시냅스만, 합친 기억 ×L, 저장소만 ×L
             s2, o2, _, _ = ER.env_step(s, a, jnp.array(2), jnp.array(0), jnp.array(False), sessA["b0"])
             return (s2, o2, e), out
         _, YH = jax.lax.scan(f, (s0, o0, e_end), plan)
         yh = YH[ai]
         return (yh @ gC) / (jnp.linalg.norm(yh, axis=-1) * jnp.linalg.norm(gC) + 1e-8)
-    sc = jax.vmap(sim)(plans, ai_all)                                    # (5, 3)
+    sc = jax.vmap(sim)(plans, ai_all)                                    # (5, 1 + 2L)
     return sc, jnp.stack([sh_before, sh_after])
 
 
 run = jax.jit(jax.vmap(memory_and_judge))
 
 NW, BS = 256, 32
-names = ["synapse_only", "combined", "store_only"]
+names = (["synapse_only"] + [f"combined_l{l:g}" for l in RIDGE_L] + [f"store_only_l{l:g}" for l in RIDGE_L]
+         if SMODE == 'ridge' else ["synapse_only", "combined", "store_only"])
 scores, shs, cidx, Tlen = [], [], [], []
 for i in range(0, NW, BS):
     idx = range(i, i + BS)
@@ -193,7 +210,7 @@ for i in range(0, NW, BS):
     print(f"batch {i // BS + 1}/{NW // BS}  T {Kk.shape[1]}", flush=True)
 sc = np.concatenate(scores); sh = np.concatenate(shs); cidx = np.array(cidx)
 
-res = dict(m=M_B, store=STORE, rounds=ROUNDS, T=Tlen, sigma2=SG ** 2, R=RP, q=QP, DF=DF, eta_a=ETA_A, eta_s=ETA_S, K=K, n=NPASS)
+res = dict(m=M_B, store=STORE, smode=SMODE, rounds=ROUNDS, T=Tlen, sigma2=SG ** 2, R=RP, q=QP, DF=DF, eta_a=ETA_A, eta_s=ETA_S, K=K, n=NPASS)
 rng = np.random.default_rng(0)
 for k, nm in enumerate(names):
     x = sc[:, :, k] + 1e-9 * rng.random(sc[:, :, 0].shape)
@@ -203,5 +220,5 @@ for k, nm in enumerate(names):
 res["shares"] = dict(before_final_sleep=dict(synapse=float(sh[:, 0, 0].mean()), store=float(sh[:, 0, 1].mean())),
                      after_final_sleep=dict(synapse=float(sh[:, 1, 0].mean()), store=float(sh[:, 1, 1].mean())))
 for nm in names:
-    print(f"m {M_B} store {int(STORE)}  {nm:13s} tries {res[nm]['tries']:.3f}  first {res[nm]['first']:.3f}  hist {res[nm]['tries_hist']}")
+    print(f"m {M_B} store {int(STORE)} {SMODE}  {nm:18s} tries {res[nm]['tries']:.3f}  first {res[nm]['first']:.3f}  hist {res[nm]['tries_hist']}")
 print(json.dumps(res), flush=True)

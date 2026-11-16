@@ -1,0 +1,18 @@
+batch 1/8  T 6412
+batch 2/8  T 6372
+batch 3/8  T 6346
+batch 4/8  T 6368
+batch 5/8  T 6376
+batch 6/8  T 6404
+batch 7/8  T 6418
+batch 8/8  T 6316
+m 32 store 1 ridge  synapse_only       tries 2.598  first 0.281  hist [72, 60, 51, 45, 28]
+m 32 store 1 ridge  combined_l0.001    tries 1.621  first 0.625  hist [160, 51, 32, 8, 5]
+m 32 store 1 ridge  combined_l0.01     tries 1.617  first 0.621  hist [159, 53, 32, 7, 5]
+m 32 store 1 ridge  combined_l0.1      tries 1.594  first 0.613  hist [157, 56, 36, 4, 3]
+m 32 store 1 ridge  combined_l1        tries 1.992  first 0.453  hist [116, 62, 51, 18, 9]
+m 32 store 1 ridge  store_only_l0.001  tries 1.492  first 0.695  hist [178, 40, 30, 6, 2]
+m 32 store 1 ridge  store_only_l0.01   tries 1.465  first 0.703  hist [180, 42, 27, 5, 2]
+m 32 store 1 ridge  store_only_l0.1    tries 1.387  first 0.750  hist [192, 38, 19, 5, 2]
+m 32 store 1 ridge  store_only_l1      tries 1.324  first 0.785  hist [201, 33, 16, 6, 0]
+{"m": 32, "store": true, "smode": "ridge", "rounds": 2, "T": [6412, 6372, 6346, 6368, 6376, 6404, 6418, 6316], "sigma2": 0.00387397245503962, "R": 0.0008939065155573189, "q": 1.8077160348184407e-05, "DF": 1024, "eta_a": 0.0, "eta_s": 0.05, "K": 64, "n": 5, "synapse_only": {"tries": 2.59765625, "first": 0.28125, "tries_hist": [72, 60, 51, 45, 28]}, "combined_l0.001": {"tries": 1.62109375, "first": 0.625, "tries_hist": [160, 51, 32, 8, 5]}, "combined_l0.01": {"tries": 1.6171875, "first": 0.62109375, "tries_hist": [159, 53, 32, 7, 5]}, "combined_l0.1": {"tries": 1.59375, "first": 0.61328125, "tries_hist": [157, 56, 36, 4, 3]}, "combined_l1": {"tries": 1.9921875, "first": 0.453125, "tries_hist": [116, 62, 51, 18, 9]}, "store_only_l0.001": {"tries": 1.4921875, "first": 0.6953125, "tries_hist": [178, 40, 30, 6, 2]}, "store_only_l0.01": {"tries": 1.46484375, "first": 0.703125, "tries_hist": [180, 42, 27, 5, 2]}, "store_only_l0.1": {"tries": 1.38671875, "first": 0.75, "tries_hist": [192, 38, 19, 5, 2]}, "store_only_l1": {"tries": 1.32421875, "first": 0.78515625, "tries_hist": [201, 33, 16, 6, 0]}, "shares": {"before_final_sleep": {"synapse": 0.08280894160270691, "store": 0.0}, "after_final_sleep": {"synapse": 0.08280894160270691, "store": 0.0}}}
