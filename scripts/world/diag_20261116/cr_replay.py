@@ -11,6 +11,9 @@
 #   - 잠 안에서는 S만 바뀌므로 M_r z_j, M_φ z_j를 잠 시작에 행렬곱으로 한 번 계산하고, 순차 갱신은 S에만.
 #   - K스텝 묶음 단위로 scan하고 묶음 끝에 잠 (vmap 아래 lax.cond는 두 갈래를 다 실행하므로). C 도착 뒤의 묶음 잠은 η = 0.
 # 환경변수 STORE=0: 저장소 없음 (S를 만들지 않음, 읽기 iii-a = 12.13 재현, 84.4%가 나와야 함).
+# 환경변수 FORGET=mult: 절차 3. 시냅스를 1단계의 곱하는 망각 (제곱근 공분산형, Potter 쓰기 + 촐레스키·Woodbury 감쇠)으로,
+#   λ, σ², R은 1단계 기록 (mult_forget.log)의 값 그대로. 감쇠·쓰기가 내용에 선형이고 이득이 z에만 의존하므로
+#   M_r, M_φ에 같은 연산을 적용 (= 설계도의 교차 통계 꼴 M_t = (G_r − S C)(H + I)⁻¹). 저장소·잠·기본값은 2단계와 같음.
 import sys, json, os; sys.path.insert(0, '/workspace/RL-TDP')
 import jax, jax.numpy as jnp, numpy as np
 from rltdp.world import errand as ER, errand_learned as EL, errand_prec as EP, errand_reuse as RU
@@ -38,9 +41,13 @@ STORE = os.environ.get('STORE', '1') == '1'
 DF, ETA_A, ETA_S, K, NPASS = 1024, 0.05, 0.05, 64, 5
 if not STORE:
     ETA_A = ETA_S = 0.0
-H1213 = 'docs/world/results/errand_diag_20261115b/eb_process_noise.log'
-prev = json.loads(open('/workspace/RL-TDP/' + H1213).read().strip().splitlines()[-1])
-SG = float(np.sqrt(prev["sigma2"][SL])); RP = float(prev["R"][SL]); QP = float(prev["q"][SL])
+FORGET = os.environ.get('FORGET', 'add')
+HFILE = ('docs/world/results/errand_diag_20261116/mult_forget.log' if FORGET == 'mult'
+         else 'docs/world/results/errand_diag_20261115b/eb_process_noise.log')
+prev = json.loads(open('/workspace/RL-TDP/' + HFILE).read().strip().splitlines()[-1])
+SG = float(np.sqrt(prev["sigma2"][SL])); RP = float(prev["R"][SL])
+QP = float(prev["q"][SL]) if FORGET == 'add' else 0.0
+LAM = 1.0 - float(prev["one_minus_lam"][SL]) if FORGET == 'mult' else 1.0
 WPHI = jax.random.normal(jax.random.PRNGKey(20261116), (DF, DZ)) / np.sqrt(DZ)
 
 
@@ -99,18 +106,34 @@ def session(sess, plans, ai_all, rk):
         return jax.lax.scan(one_pass, S, jax.random.split(k, NPASS))[0]
 
     def awake(c, inp):
-        Mr, P, Mphi, S = c
+        Mr, P, Mphi, S = c                                                # P: add면 공분산, mult면 제곱근 인자 (P = LLᵀ)
+        Mr0, P0, Mphi0 = Mr, P, Mphi                                      # 쓰지 않는 스텝 (C 도착 뒤)은 감쇠도 없이 그대로
         z, ph, r, w = inp
-        P = P + QP * jnp.eye(DZ)
-        Pz = P @ z; Sv = RP + z @ Pz; g = Pz / Sv
-        Mr2 = Mr + jnp.outer(r - Mr @ z, g)
-        Mphi2 = Mphi + jnp.outer(ph - Mphi @ z, g)
-        P2 = P - jnp.outer(Pz, Pz) / Sv
+        if FORGET == 'mult':
+            L = P
+            Cm = LAM * jnp.eye(DZ) + (1 - LAM) * (L.T @ L)
+            Lc = jnp.linalg.cholesky(Cm)
+            Ci_Lt = jax.scipy.linalg.cho_solve((Lc, True), L.T)
+            Mr = Mr - (1 - LAM) * (Mr @ L) @ Ci_Lt
+            Mphi = Mphi - (1 - LAM) * (Mphi @ L) @ Ci_Lt
+            L = jax.scipy.linalg.solve_triangular(Lc, L.T, lower=True).T
+            fv = L.T @ z; Sv = RP + fv @ fv
+            al = 1.0 / Sv; ga = 1.0 / (1.0 + jnp.sqrt(al * RP))
+            g = al * (L @ fv)
+            Mr2 = Mr + jnp.outer(r - Mr @ z, g)
+            Mphi2 = Mphi + jnp.outer(ph - Mphi @ z, g)
+            P2 = L - ga * jnp.outer(g, fv)
+        else:
+            P = P + QP * jnp.eye(DZ)
+            Pz = P @ z; Sv = RP + z @ Pz; g = Pz / Sv
+            Mr2 = Mr + jnp.outer(r - Mr @ z, g)
+            Mphi2 = Mphi + jnp.outer(ph - Mphi @ z, g)
+            P2 = P - jnp.outer(Pz, Pz) / Sv
         S2 = S + ETA_A * jnp.outer(r - S @ ph, ph)
         yh = Mr2 @ z + S2 @ (ph - Mphi2 @ z)                              # 쓴 뒤 합친 예측 (도착 순간 쓰인 몫)
         got = yh @ r / (r @ r + 1e-12)
         sel = lambda a, b: jnp.where(w, a, b)
-        return (sel(Mr2, Mr), sel(P2, P), sel(Mphi2, Mphi), sel(S2, S)), got
+        return (sel(Mr2, Mr0), sel(P2, P0), sel(Mphi2, Mphi0), sel(S2, S)), got
 
     def chunk(c, ci):
         sl = lambda A: jax.lax.dynamic_slice_in_dim(A, ci * K, K)
@@ -161,7 +184,7 @@ for i in range(0, 256, BS):
 sc, nrm, got, sh, active, fin = [np.concatenate([o[k] for o in outs]) for k in range(6)]
 
 names = ["i_combined", "ii_store", "iiib_synapse_share", "Mr_z"]
-res = dict(store=STORE, DF=DF, eta_a=ETA_A, eta_s=ETA_S, K=K, n=NPASS, sigma2=SG ** 2, R=RP, q=QP,
+res = dict(forget=FORGET, lam=LAM, store=STORE, DF=DF, eta_a=ETA_A, eta_s=ETA_S, K=K, n=NPASS, sigma2=SG ** 2, R=RP, q=QP,
            written=float(got.mean()))
 for k, nm in enumerate(names):
     x = sc[:, :, k]
