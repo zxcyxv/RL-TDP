@@ -1,0 +1,12 @@
+batch 1/8  T 194
+batch 2/8  T 192
+batch 3/8  T 196
+batch 4/8  T 188
+batch 5/8  T 202
+batch 6/8  T 190
+batch 7/8  T 194
+batch 8/8  T 192
+m 0 store 1  synapse_only  tries 1.023  first 0.984  hist [252, 2, 2, 0, 0]
+m 0 store 1  combined      tries 1.055  first 0.961  hist [246, 6, 4, 0, 0]
+m 0 store 1  store_only    tries 1.203  first 0.855  hist [219, 22, 15, 0, 0]
+{"m": 0, "store": true, "rounds": 2, "T": [194, 192, 196, 188, 202, 190, 194, 192], "sigma2": 0.00387397245503962, "R": 0.0008939065155573189, "q": 1.8077160348184407e-05, "DF": 1024, "eta_a": 0.05, "eta_s": 0.05, "K": 64, "n": 5, "synapse_only": {"tries": 1.0234375, "first": 0.984375, "tries_hist": [252, 2, 2, 0, 0]}, "combined": {"tries": 1.0546875, "first": 0.9609375, "tries_hist": [246, 6, 4, 0, 0]}, "store_only": {"tries": 1.203125, "first": 0.85546875, "tries_hist": [219, 22, 15, 0, 0]}, "shares": {"before_final_sleep": {"synapse": 0.1115950345993042, "store": 0.0738348513841629}, "after_final_sleep": {"synapse": 0.09935646504163742, "store": 0.08486567437648773}}}
