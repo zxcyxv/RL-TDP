@@ -1,0 +1,1470 @@
+OpenAI Codex v0.169.0
+--------
+workdir: /workspace/RL-TDP
+model: gpt-6.1-sol
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: ultra
+reasoning summaries: none
+session id: 01a1e876-5d85-7fd0-baa9-cd47ceaa4b43
+--------
+user
+# Codex 조사 요청: 칼만 시냅스의 수치 붕괴, 근본 원인과 해법 (2026-11-17)
+
+## 질문
+
+이 레포의 빠른 시냅스 (칸별 칼만/RLS 연상 기억)를 학습하면 float32에서 수치가 깨진다. **보통의 딥러닝 모델 (선형 어텐션, DeltaNet류 빠른 가중치, RNN, 트랜스포머)은 이런 문제가 거의 없는데, 이 모델에서는 왜 생기는가?** 근본 원인을 밝히고, 원리를 지키면서 빠른 해법이 있는지 조사해 달라.
+
+## 모델 (요약)
+
+자세한 명세: `docs/world/spec_q8_r0_pipeline.md`, `docs/world/spec_wm_joint.md`. 코드: `scripts/world/diag_20261117/synapse_wm_joint.py`, `synapse_cellkey.py`.
+
+- 칸 p마다 M_p ∈ R^{8×256}, P_p ∈ R^{256×256} (공분산형, float32). 세션 시작 M = 0, P = I.
+- 매 스텝: P ← P + q_p I; z = σ_p [k; e]; S = R₀ + R_p + zᵀPz; g = Pz/S; M ← M + (r − Mz) gᵀ; P ← P − (Pz)(Pz)ᵀ/S.
+- σ_p, R_p, q_p와 키 망 (와 동시 학습 판에서는 월드 모델)을 순차 예측 NLL Σ ½[‖r − Mz‖²/S + 8 log S]로 세션 전체 역전파 학습 (`jax.checkpoint`로 스텝마다 재계산, 세션 518스텝, 배치 8).
+- R₀ = 1.34e-6: 관측 (8비트 양자화 텍스처)의 양자화 잡음 바닥.
+
+## 관측된 것 (사실)
+
+1. R₀ 없이 월드 모델 고정, 키 학습: 3160반복에서 NaN. 직전 체크포인트 진단 (`docs/world/results/synapse_layer_20261117/nan_diag_P_vs_R.json`): 시야 칸 학습된 R ≈ 1e-13, S 최소 ≈ 5e-11–1e-10, zᵀPz 음수 0회, 세션 끝 P 최소 고유값 −1e-7–−4e-7.
+2. R₀ 넣고 월드 모델 고정, 키 학습: 1만 반복 NaN 없음.
+3. R₀ 넣고 **월드 모델을 사전학습 없이 동시 학습**: 958반복에서 NaN. 900반복 체크포인트 진단 (`wm_joint_diag_P.json`): 시야 칸 R ≈ 4e-9, S 최소 ≈ R₀, **zᵀPz 음수 발생 (최저 −3.1e-8, 64세션 중 6세션)**, 세션 끝 P 최소 고유값 최저 −3.4e-6, ‖z‖² 최대 약 9.
+4. 같은 판에서 Pz를 TF32 대신 FP32로 계산: 915반복에서 NaN (효과 없음).
+5. 시도와 비용: 제곱근형 (P = SSᵀ, Potter 쓰기 + 과정 잡음마다 촐레스키)은 맞지만 반복당 약 14배 느림. 칼만 상태만 float64는 약 6배 느림 (소비자용 RTX 5090). 매 스텝 대칭화 (P + Pᵀ)/2는 역전파에서 P 덩어리 (518 × 8 × 12 × 256 × 256 float32 ≈ 13GB)의 전치 복사를 만들어 메모리 부족. 행렬곱 Joseph 형식은 스텝당 256³.
+
+## 바라는 답
+
+1. 근본 원인. 예: 공분산형 빼기 갱신의 조건수/동적 범위 (사전 1 대 사후 1e-8)와 float32 정밀도, 학습이 R → 0과 결정적 관측으로 몰아가는 구조, 역전파와의 상호작용 등. 무엇이 주원인이고 무엇이 아닌지 근거와 함께.
+2. 보통의 딥러닝 모델 (특히 DeltaNet, Gated DeltaNet, Longhorn, Kalman 계열 선형 어텐션 등 공분산·전처리 행렬을 쓰는 것 포함)이 이 문제를 어떻게 피하거나 겪는지. 문헌은 원문을 확인한 것과 기억에 의존한 것을 구분.
+3. 해법 후보와 각자의 비용·원리 보존 여부. 특히 스텝당 O(d²), GPU 친화적, (가능하면) 시간 병렬과 양립하는 것. 정확한 칼만과 달라지는 근사라면 무엇이 달라지는지.
+4. 이 레포의 원리 (칼만 이득 = 정밀도, 손 장치 금지, 경험적 베이즈)와 맞는 권고 하나와 그 이유.
+
+## 규칙
+
+- 이론·조사만. 코드 구현, 학습, 실험 실행은 하지 않는다. 레포 파일을 수정하지 않는다. 코드와 결과 파일은 읽어도 된다.
+- 한국어로 답한다. 대목마다 중간 답변을 메시지로 내보내고, 마지막에 합친 답을 낸다.
+
+codex
+새 명세와 NaN 진단 파일을 먼저 대조하겠습니다. 정방향 필터의 붕괴와 역전파의 붕괴를 구분하고, 관련 모델들의 원문·구현을 확인해 비용과 원리 보존 여부를 비교하겠습니다. 1–4를 마칠 때마다 중간 답변을 보내겠습니다. 파일 수정이나 실험 실행은 하지 않습니다.
+
+exec
+/bin/bash -lc 'git status --short && wc -l docs/world/spec_q8_r0_pipeline.md docs/world/spec_wm_joint.md scripts/world/diag_20261117/synapse_wm_joint.py scripts/world/diag_20261117/synapse_cellkey.py && cat docs/world/spec_q8_r0_pipeline.md docs/world/spec_wm_joint.md' in /workspace/RL-TDP
+ succeeded in 0ms:
+ M docs/world/synapse_layer_spec_basic.md
+ M rltdp/world/env.py
+ M rltdp/world/errand.py
+?? docs/world/codex_prompt_architecture_research.md
+?? docs/world/codex_prompt_kalman_numerics.md
+?? docs/world/results/synapse_layer_20261117/
+?? docs/world/spec_q8_r0_pipeline.md
+?? docs/world/spec_wm_joint.md
+?? scripts/world/diag_20261117/
+  132 docs/world/spec_q8_r0_pipeline.md
+   34 docs/world/spec_wm_joint.md
+  251 scripts/world/diag_20261117/synapse_wm_joint.py
+  471 scripts/world/diag_20261117/synapse_cellkey.py
+  888 total
+# 명세: 양자화 + R₀ 칸별 키 시냅스, 전체 학습 과정 (2026-11-17)
+
+이 문서만 읽고 실험 전체를 이해하고 재현할 수 있게 쓴다. 코드: `scripts/world/diag_20261117/synapse_cellkey.py`, 환경 `rltdp/world/errand.py`·`env.py`, 월드 모델 `rltdp/world/errand_prec.py`. 결과: `docs/world/results/synapse_layer_20261117/q8_*`.
+
+## 1. 무엇을 보려는 실험인가
+
+에이전트가 **한 세션 안에서 겪은 사실을 기억해 두었다가, 나중에 다른 경로로 다시 갔을 때 꺼내 쓸 수 있는가**를 본다. 기억은 신경망의 역전파가 아니라 순전파 중에 쓰이는 빠른 시냅스 (선형 연상 기억, 칼만 필터로 갱신)다. 느린 가중치 (월드 모델, 키를 만드는 망, 칼만 매개변수)는 여러 세계로 미리 학습하고, 평가 중에는 고정한다.
+
+## 2. 환경: 지연 채집 (errand)
+
+### 2.1 세계
+
+- 11 × 11 격자. 가장자리는 벽. 바닥 칸은 12종 무늬 중 하나 (무작위).
+- 보급소 1곳, 채집처 5곳 (서로 체비쇼프 거리 3 이상, 보급소와 맨해튼 거리 4 이상).
+- 채집처마다 산출물이 정해져 있다: A, A, B, B, C를 무작위로 섞어 배정.
+- 역할 이름: **a0** = A 채집처 중 하나, **b0**·**b1** = B 채집처 둘. 세션 중간에 **b0의 산출물이 B → C로 바뀐다.** b1은 끝까지 B.
+- 세계는 시드 하나로 정해진다. 세계마다 지도·배치·배정이 다르다.
+
+### 2.2 행동과 규칙
+
+- 행동 6개: 이동 4 (동·서·남·북), **상호작용**, **대기**.
+- 채집처에서 상호작용하면 작업이 시작되고, **8스텝 뒤** 그 채집처의 산출물이 "도착" 칸에 나타난다 (그 사이 에이전트는 어디로 가도 된다).
+- 보상 (이 실험에서는 쓰지 않음): 도착한 산출물이 현재 의뢰와 같으면 +1.
+
+### 2.3 관측
+
+- 매 스텝 **칸 12개**를 본다.
+  - 시야 9칸: 에이전트 중심 3 × 3 지도.
+  - HUD 3칸: 의뢰 카드 (이 실험에서는 뒷면만 보임), **도착 칸** (방금 도착한 산출물, 없으면 빈칸), 도장 칸.
+- 칸 하나는 **7 × 7 픽셀 RGB 타일** (147개 값). 타일 종류는 25개 (벽, 바닥 12, 채집처, 보급소, 산출물 A·B·C, 카드 뒷면, 빈칸, 도장 등). 같은 종류는 언제나 같은 그림이다.
+- 타일 그림 = 타일마다 색 하나 (균등난수) × 0.6 + 픽셀별 고정 난수 무늬 × 0.4. 벽은 0.05로 채운 어두운 칸.
+- **8비트 양자화 (이번 판부터):** 픽셀값을 k/255로 반올림한다 (`env.py` `textures`). 실제 게임 화면 (Craftax, Minecraft)처럼 만들기 위함이다. 이전 판은 반올림 없는 float32였다. 양자화가 바꾼 픽셀값은 최대 1/510.
+- **특징:** 칸마다 147개 픽셀값에 고정 난수 사영 We (147 → 8, 성분 N(0, 1/147), 시드 900)을 곱하고, 25종 타일 특징의 평균을 뺀다. 칸 하나 = 8차원, 장면 = 12 × 8.
+
+### 2.4 교사 세션 (학습과 판정에 쓰는 경험)
+
+에이전트가 직접 행동하지 않는다. 정해진 교사 경로를 따라가며 관측을 받는다. 순서:
+
+1. **관찰:** 채집처 5곳을 무작위 순서로 한 번씩 방문. 방문마다 "보급소 → 채집처로 이동, 상호작용, 보급소로 복귀, 시작 후 9스텝이 될 때까지 대기". 그래서 모든 채집처의 산출물을 한 번씩 본다 (b1의 B도 여기서 한 번 본다).
+2. **A 의뢰 4번:** 매번 a0에 다녀온다.
+3. **B 의뢰:** b0에 다녀온다 (B를 본다).
+4. **보존 256스텝:** 보급소 주변을 맴돈다 (이동과 대기). 이 구간 중간에 b0의 산출물이 C로 바뀐다 (관측으로는 보이지 않음).
+5. **변경 증거:** b0에 다녀온다. **C가 도착한다.**
+
+세션 길이는 약 450–500스텝. 짧은 세션은 대기로 채워 길이를 맞춘다 (학습 자료 518스텝).
+
+## 3. 모델
+
+### 3.1 월드 모델 μ⁰ (느린, 사전학습 후 고정)
+
+- 입력: 지금 장면 특징 (12 × 8 = 96) + 행동 원-핫 (6).
+- 구조: 102 → 256 (ReLU) → 칸별 다음 특징의 평균 μ⁰ (12 × 8) + 칸별 로그 분산 (12).
+- 목적: 칸별 가우시안 음의 로그우도 (다음 장면 특징). **기억 없이 한 스텝만 보고 예측한다.**
+- 자료: 학습 세계 512개 (시드 50,000–50,511)의 교사 세션 전체.
+- 최적화: Adam lr 1e-3, 기울기 노름 1로 자름, 배치 32세션, 400반복.
+- **저장:** 학습한 μ⁰를 `wm_q8.npz`로 저장하고 이후 모든 실행이 그대로 불러 쓴다. (실행마다 다시 학습하면 GPU 비결정성 때문에 μ⁰가 달라지고, 같은 설정의 판정이 54–85%로 흔들린다는 것을 확인했다.)
+
+### 3.2 빠른 시냅스 (칸마다 하나, 세션 안에서만 갱신)
+
+시냅스가 담는 것은 **월드 모델이 못 맞힌 몫 (잔차)** 이다.
+
+- 값: 칸 p의 잔차 r_p = 다음 장면 특징_p − μ⁰_p (8차원).
+- 상태: 칸마다 M_p (8 × 256, 내용)와 P_p (256 × 256, 내용의 불확실성). 세션 시작마다 M = 0, P = I.
+- 주소 (= 질의): z_p = σ_p · [k_p; e_p] (256차원). k_p는 지금 스텝의 키, e_p는 키의 흔적 (3.3절).
+- 예측: 잔차 평균 M_p z_p, 분산 S_p = **R₀** + R_p + z_pᵀ P_p z_p.
+- 한 스텝의 갱신 (표준 칼만 필터, 칸마다):
+  1. 과정 잡음: P_p ← P_p + q_p I (오래된 내용일수록 덜 믿게 됨)
+  2. 예측 오차: δ = r_p − M_p z_p
+  3. 이득: g = P_p z_p / S_p
+  4. 쓰기: M_p ← M_p + δ gᵀ,  P_p ← P_p − (P_p z_p)(P_p z_p)ᵀ / S_p
+- 칸별 매개변수 (12칸 × 3 = 36개, 느린 학습으로 맞춤): σ_p² (기억 몫의 사전 분산), R_p (관측 잡음), q_p (과정 잡음).
+- **R₀ (관측 잡음 바닥, 고정):** 8비트 양자화 잡음. 픽셀당 분산 (1/255)²/12를 We에 통과시킨 특징 차원당 분산 = 평균 ‖We 열‖² × (1/255)²/12 ≈ **1.34e-6**. 이 바닥이 없으면 결정적인 관측 (같은 타일은 늘 같은 값)에서 학습이 R_p → 0으로 가며 우도가 −∞로 발산하고, 수치가 깨진다 (NaN).
+
+### 3.3 키와 흔적 (느린 망이 만드는 주소)
+
+- 시야 특징 w = 시야 9칸 특징 (72차원). HUD 3칸은 주소에 넣지 않는다.
+- 칸 p의 키 (칸마다 다르다, 망은 공유):
+  - u_p = w + MLP([w; 칸 위치 원-핫 p]),  MLP 84 → 128 (SiLU) → 72, 마지막 층 0으로 초기화
+  - k̂_p = W_k[a] u_p,  W_k[a] ∈ R^{128 × 72} (행동마다 하나, 초기값 = 고정 난수)
+  - ℓ_p = 선형([w; 행동 원-핫; 칸 위치 원-핫]) (초기 0)
+  - k_p = exp(ℓ_p) · k̂_p / ‖k̂_p‖ (크기 exp(ℓ)를 학습)
+- 흔적 (칸마다): e_p ← α e_p + k_p,  α = sigmoid(θ_α) (모든 칸 공유, 초기 반감기 8스텝).
+- 주소: x_p = [k_p; e_p] (256), z_p = σ_p x_p.
+- 흔적이 있어서, 8스텝 늦게 도착한 산출물이 상호작용하던 순간의 키에 이어진다.
+- 초기값에서는 모든 칸의 키가 같고 크기 1, 즉 "고정 난수 키"와 같다.
+
+## 4. 느린 학습 (여러 세계, 역전파)
+
+- **목적: 교사 세션 전체의 순차 예측 음의 로그우도.** 스텝마다 쓰기 전 예측 (평균 M z, 분산 S)으로 실제 잔차의 가우시안 NLL을 재고, 그다음 쓴다. 세션 끝까지, 12칸 모두 더한다.
+  - Σ_t Σ_p ½ [‖r_p − M_p z_p‖² / S_p + 8 · log S_p]
+  - 이 선형 가우시안 기억 모형에서 이 합은 정확한 음의 로그 주변우도 (증거)다. 그래서 "경험적 베이즈"라 부른다.
+- 기울기는 칼만 재귀 (M, P)를 거쳐 키 망과 σ, R, q로 흐른다. 세션 전체를 역전파하고, 스텝마다 재계산 (`jax.checkpoint`).
+- 자료: 학습 세계 1,024개 (시드 50,000–51,023), 검증 세계 128개 (51,024–51,151). 판정 세계와 겹치지 않는다.
+- 최적화: Adam. 키 망 lr 1e-3, 칼만 매개변수 lr 0.05. 배치 8세션.
+- 100반복마다 검증 NLL. **최종 결과는 검증 NLL이 가장 낮은 시점**의 가중치로 정한다 (판정 결과로 고르지 않는다). 500반복마다 판정을 기록만 한다.
+
+### 4.1 두 단계로 실행
+
+1. **기준선 (키 고정):** 키는 초기값 (고정 난수)으로 묶고 σ², R, q만 학습한다. 1,000반복. 칼만 매개변수 초기값은 이전 연구 (12.13)에서 맞춘 값. 같은 μ⁰ 위에서 "학습된 키 없이" 얼마나 되는지의 기준. 결과 `q8_base_frozen_1k.*` (최저 검증 NLL 500반복).
+2. **키 학습:** 기준선의 σ², R, q에서 출발해 키 망과 칼만 매개변수를 함께 학습한다. 5,000반복. 결과 `q8_learned_5k.*`.
+
+두 단계는 같은 μ⁰ (`wm_q8.npz`)를 쓴다. 그래서 두 결과의 차이는 키 학습의 효과다.
+
+## 5. 판정 (평가, 학습에 쓰지 않음)
+
+- 판정 세계 256개 (시드 1,000–1,255)의 교사 세션을 그대로 돌리며 기억을 쓴다. **C가 도착한 순간 이후로는 쓰지 않는다** (그때의 기억을 평가).
+- 그 기억을 고정한 채, 채집처 5곳마다 "보급소 → 채집처 이동, 상호작용, 복귀하며 도착까지 대기"를 흉내 낸다. 환경은 실제로 진행하고 (관측을 받음), 키와 흔적도 같은 식으로 계산한다. 기억에는 쓰지 않는다.
+- 흉내 낸 경로의 도착 스텝에서 도착 칸의 기억 읽기 ŷ = M_도착칸 z를 얻는다.
+- 점수 = cos(ŷ, g_B), g_B = B 타일 특징 − (A, B, C 타일 특징 평균). "여기서 하면 B가 온다"고 기억이 말하는 정도.
+- 점수가 가장 높은 채집처를 고른다 (동점은 무작위). **정답은 b1** (B가 그대로인 곳). b0을 고르면 바뀐 사실 (C)을 반영하지 못한 것, 그 밖은 엉뚱한 곳.
+- 지표: b1 / b0 / 다른 곳 비율 (세계 256개, 비율 1점 ≈ 2.6세계). 세계별 승패도 기록해 짝지어 비교한다.
+
+## 6. 결과 (2026-11-17)
+
+| 단계 | 검증 NLL | b1 / b0 / 다른 곳 |
+|---|---|---|
+| 시작 (이전 연구 값, 새 μ⁰) | −197,260 | 85.2 / 14.8 / 0% |
+| 기준선 (키 고정, σ²·R·q 재적합, 500반복) | −199,485 | 70.7 / 29.3 / 0% |
+| 키 학습 1,000반복 | −233,209 | 53.9 / 45.7 / 0.4% |
+| 키 학습 3,000반복 | −241,819 | 71.5 / 28.5 / 0% |
+| 키 학습 5,000반복 (최종) | −245,797 | 74.6 / 25.4 / 0% |
+
+- 키 학습 최종 대 기준선, 세계별 짝 비교: 기준선에서 틀렸다가 맞은 세계 35, 맞았다가 틀린 세계 25, 부호 검정 p = 0.25 (우연과 구별되지 않음).
+- 학습된 키 (도착 칸): 크기 상호작용 62.8 / 이동 0.54 / 대기 0.05, 이웃 스텝 주소 코사인 0.94 → 0.64, 흔적 반감기 6.0.
+- 증거 (검증 NLL)는 크게 좋아지는데 판정은 거의 그대로다. 같은 꼴이 키 고정 기준선에서도 보인다 (σ², R, q 재적합으로 판정 85 → 71%).
+
+## 7. 알려진 한계
+
+- 학습 목적 (교사 경로의 다음 잔차 예측)과 판정 (오래전 사실을 다른 경로로 다시 읽기)이 다르다.
+- 교사 세션에는 오래 지난 뒤에도 그대로인 사실을 다시 확인하는 구간이 없다 (b1은 관찰 단계에서 한 번만 본다).
+- 시드 1개 (판정·학습 세계 집합, 초기화 각각 하나).
+- 학습은 C 도착 뒤 귀환·대기 구간에서도 기억을 쓰지만, 판정은 C 도착에서 쓰기를 멈춘다.
+# 명세: 월드 모델 + 시냅스 동시 학습 (사전학습 없음), 2026-11-17
+
+바탕: [`spec_q8_r0_pipeline.md`](spec_q8_r0_pipeline.md) (환경·관측·시냅스·키·판정은 그 문서와 같다). 코드 `scripts/world/diag_20261117/synapse_wm_joint.py`.
+
+## 목적
+
+시냅스는 월드 모델의 유일한 기억 (순환 상태)이다. 지금까지는 시냅스 읽기가 예측에 더해지기만 했다 (ŷ = μ⁰ + M z). 이번에는 **읽기가 월드 모델의 입력으로도 들어가** 지금 장면의 해석을 고치게 한다. 월드 모델 사전학습 없이 처음부터 함께 학습한다.
+
+## 바뀌는 것
+
+- 예측: ŷ = F₀(o, a) + m + G(o, a, m)
+  - F₀(o, a): 기억 없는 예측 (102 → 256 ReLU → 96). **무작위 초기화, 함께 학습** (사전학습 없음).
+  - m: 시냅스 읽기, 칸마다 M_p z_p (쓰기 전). 예측에 그대로 더한다 (지름길).
+  - G(o, a, m): 기억을 입력으로 받는 망 (198 → 256 SiLU → 96), **마지막 층 0** (처음에는 ŷ = F₀ + m).
+- 학습 목적: 순차 NLL Σ_t Σ_p ½ [‖y_p − ŷ_p‖² / S_p + 8 log S_p], S_p = R₀ + R_p + z_pᵀ P_p z_p (칼만 예측 분산 그대로).
+
+## 그대로인 것 (12.11의 실패를 피하는 조건)
+
+- **쓰기 값 = 기억 없는 예측의 잔차** r = y − F₀(o, a). 시냅스는 이번 세계에만 해당하는 사실을 담는다. (12.11은 쓰기 값을 관측 그대로로 바꿔 실패.)
+- **쓰기 규칙 = 칼만** (P + qI, 이득 P z / S, M ← M + (r − m) gᵀ). G는 쓰기에 들어가지 않는다. 쓰기 크기는 σ², R, q, P로만 정한다. (12.11은 쓰기 크기를 기억을 본 월드 모델 분산에서 가져와 실패.)
+- **흔적은 월드 모델에 넣지 않는다.** 흔적은 시냅스 주소에만 쓴다. 지난 일의 정보는 m을 거쳐서만 월드 모델에 들어간다. (12.11은 흔적을 직접 넣어 월드 모델이 기억을 무시하고도 도착 시점을 맞힘.)
+- 칸별 키 (synapse_cellkey와 같은 꼴, 초기 = 고정 난수 키), 칸별 칼만, R₀ 8비트, 8비트 양자화 텍스처.
+- 자료·배치·판정 세계: 앞 명세와 같다. lr: 키 1e-3, 월드 모델 (F₀, G) 1e-3, 칼만 0.05. 10,000반복, 최저 검증 NLL 시점 채택.
+
+## 판정 (세 가지 읽기, 같은 절차)
+
+- syn: 시냅스 읽기 m (지금까지의 판정과 같음)
+- wm: 월드 모델의 기억 몫 m + G(o, a, m)
+- wm_memoff: 기억을 끈 G(o, a, 0) (기억을 실제로 쓰는지 확인용. 우연 수준이어야 한다)
+
+## 비교와 한계
+
+- 출발점이 완전히 달라 (월드 모델 무작위), 앞 명세의 기준선 (70.7%)과 직접 비교할 수 없다. 함께 기록한다.
+- 초기에는 F₀가 아무것도 모르니 잔차가 관측 거의 전부이고 시냅스가 공통 규칙까지 떠안는다. F₀가 배울수록 시냅스 몫이 이번 세계의 사실로 줄어들 것으로 예상한다.
+
+exec
+/bin/bash -lc 'cat docs/world/results/synapse_layer_20261117/nan_diag_P_vs_R.json docs/world/results/synapse_layer_20261117/wm_joint_diag_P.json' in /workspace/RL-TDP
+ succeeded in 0ms:
+{
+ "ckpt": "docs/world/results/synapse_layer_20261117/cellkey_10k_params.npz",
+ "R": [
+  2.2091447323801389e-13,
+  2.232428922711166e-13,
+  2.3376651092296696e-13,
+  2.579237008432794e-13,
+  8.270856601596405e-14,
+  2.7151135614973676e-13,
+  3.606592563661082e-13,
+  2.0892398325689926e-13,
+  2.435260651988125e-13,
+  1.7588935950080264e-13,
+  0.0009290287271142006,
+  4.8275658644236774e-12
+ ],
+ "zPz_min": [
+  5.2119725202359746e-11,
+  9.637668441087044e-11,
+  1.1300880370379573e-10,
+  1.0614965156863221e-10,
+  4.318371701894641e-11,
+  1.0303534414557447e-10,
+  1.3047174451941146e-10,
+  1.0048724352618166e-10,
+  1.06425798729326e-10,
+  6.652362688486235e-11,
+  2.2237904886424076e-06,
+  1.518022707536204e-09
+ ],
+ "frac_steps_zPz_negative": [
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0
+ ],
+ "S_min": [
+  5.234063876757844e-11,
+  9.659992944444085e-11,
+  1.1324256810052447e-10,
+  1.0640757719393434e-10,
+  4.326642516483403e-11,
+  1.0330685612514046e-10,
+  1.3083240046896094e-10,
+  1.006961666827344e-10,
+  1.0666932614977753e-10,
+  6.669951396753859e-11,
+  0.0009312524925917387,
+  1.5228502903141816e-09
+ ],
+ "S_min_over_R": [
+  236.92715454101562,
+  432.71221923828125,
+  484.42596435546875,
+  412.5544738769531,
+  523.1190185546875,
+  380.4881591796875,
+  362.759033203125,
+  481.9751281738281,
+  438.0201721191406,
+  379.212890625,
+  1.0023936033248901,
+  315.4488830566406
+ ],
+ "max_err2_over_S": [
+  1253.5013427734375,
+  888.3413696289062,
+  847.3601684570312,
+  1212.4622802734375,
+  936.1707763671875,
+  706.073974609375,
+  1002.37109375,
+  950.9265747070312,
+  892.3802490234375,
+  1897.423828125,
+  589.1710815429688,
+  1327.3277587890625
+ ],
+ "P_eigmin_end": [
+  -3.0084709123912035e-07,
+  -3.0325421107590955e-07,
+  -4.2381302023386525e-07,
+  -2.4874876203284657e-07,
+  -2.6051358759104914e-07,
+  -2.98515772101382e-07,
+  -2.2493222218145092e-07,
+  -3.654994316093507e-07,
+  -2.7014652914658654e-07,
+  -1.3200373416566435e-07,
+  1.8767719666357152e-05,
+  -1.1637853702950451e-07
+ ],
+ "sessions_with_negative_zPz": 0,
+ "any_nonfinite": false
+}{
+ "ckpt": "docs/world/results/synapse_layer_20261117/wm_joint_10k_best_params.npz",
+ "R0": 1.3409488310832847e-06,
+ "R": [
+  3.780477708659191e-09,
+  3.755059374555003e-09,
+  3.3958766909591986e-09,
+  3.9206513591238945e-09,
+  2.1114294757040852e-09,
+  4.03463484843769e-09,
+  5.109184630924801e-09,
+  3.4571920881631968e-09,
+  3.492484523803796e-09,
+  1.1378045172705242e-08,
+  6.702023256366374e-06,
+  8.454384214928723e-08
+ ],
+ "zPz_min": [
+  -3.729372366478856e-09,
+  -5.054860530151473e-09,
+  -6.526175155840974e-09,
+  -8.041363130928403e-09,
+  1.0703899988584453e-08,
+  -3.882096422103132e-09,
+  -2.226088113843616e-08,
+  1.5593961677495827e-09,
+  -3.101155243712128e-08,
+  1.2463994281119994e-08,
+  1.821112891775556e-05,
+  6.196010872372426e-06
+ ],
+ "frac_steps_zPz_negative": [
+  3.016409209521953e-05,
+  9.0492278104648e-05,
+  3.016409209521953e-05,
+  9.0492278104648e-05,
+  0.0,
+  3.016409209521953e-05,
+  0.00015082045865710825,
+  0.0,
+  0.00015082045865710825,
+  0.0,
+  0.0,
+  0.0
+ ],
+ "sessions_with_negative_zPz": 6,
+ "S_min": [
+  1.3409999155555852e-06,
+  1.339649088549777e-06,
+  1.3378185030887835e-06,
+  1.3368280633585528e-06,
+  1.3537642189476173e-06,
+  1.3411014379016706e-06,
+  1.3237971643320634e-06,
+  1.34596552925359e-06,
+  1.313429720539716e-06,
+  1.3647908190250746e-06,
+  2.6254099793732166e-05,
+  7.621503755217418e-06
+ ],
+ "max_err2_over_S": [
+  158.61647033691406,
+  123.49324035644531,
+  123.47042083740234,
+  112.20590209960938,
+  116.52875518798828,
+  133.73390197753906,
+  109.41085815429688,
+  165.79771423339844,
+  127.15263366699219,
+  71.66712188720703,
+  1684.0360107421875,
+  2362.137939453125
+ ],
+ "P_eigmin_end": [
+  -1.010031969173042e-08,
+  -1.3635043671911262e-07,
+  1.0199828537338362e-08,
+  -3.656072422586476e-08,
+  2.164870505083627e-09,
+  2.466417292623646e-08,
+  -1.2402949778334005e-07,
+  -3.4296569992875447e-06,
+  2.2837278734755273e-08,
+  7.500400442950195e-06,
+  8.48154832056025e-06,
+  2.5802894469961757e-06
+ ],
+ "max_z_sq": [
+  8.820184707641602,
+  6.165781021118164,
+  7.937522888183594,
+  7.017054557800293,
+  3.5866715908050537,
+  6.665196418762207,
+  8.102442741394043,
+  5.935502052307129,
+  7.026639461517334,
+  0.014159593731164932,
+  2.879021406173706,
+  1.679621696472168
+ ],
+ "P_all_finite": true
+}
+exec
+/bin/bash -lc "nl -ba scripts/world/diag_20261117/synapse_wm_joint.py | sed -n '1,290p'" in /workspace/RL-TDP
+exec
+/bin/bash -lc 'rg --files scripts/world/diag_20261117 docs/world/results/synapse_layer_20261117 | sort' in /workspace/RL-TDP
+ succeeded in 0ms:
+docs/world/results/synapse_layer_20261117/cellkey.json
+docs/world/results/synapse_layer_20261117/cellkey.log
+docs/world/results/synapse_layer_20261117/cellkey_10k.json
+docs/world/results/synapse_layer_20261117/cellkey_10k.log
+docs/world/results/synapse_layer_20261117/cellkey_10k_params.npz
+docs/world/results/synapse_layer_20261117/cellkey_params.npz
+docs/world/results/synapse_layer_20261117/cellkey_params_qdiag.json
+docs/world/results/synapse_layer_20261117/cellkey_qdiag.log
+docs/world/results/synapse_layer_20261117/cellkey_r0_10k.json
+docs/world/results/synapse_layer_20261117/cellkey_r0_10k.log
+docs/world/results/synapse_layer_20261117/cellkey_r0_10k_params.npz
+docs/world/results/synapse_layer_20261117/codex_architecture_research.log
+docs/world/results/synapse_layer_20261117/codex_architecture_research_aborted1.log
+docs/world/results/synapse_layer_20261117/codex_architecture_research_aborted2.log
+docs/world/results/synapse_layer_20261117/codex_architecture_research_answer.md
+docs/world/results/synapse_layer_20261117/codex_kalman_numerics.log
+docs/world/results/synapse_layer_20261117/codex_kalman_numerics_answer.md
+docs/world/results/synapse_layer_20261117/codex_q_minecraft.log
+docs/world/results/synapse_layer_20261117/codex_q_minecraft_answer.md
+docs/world/results/synapse_layer_20261117/codex_q_why.log
+docs/world/results/synapse_layer_20261117/codex_q_why_answer.md
+docs/world/results/synapse_layer_20261117/decomp_r0.json
+docs/world/results/synapse_layer_20261117/decomp_r0.log
+docs/world/results/synapse_layer_20261117/deq_frozen_1k.json
+docs/world/results/synapse_layer_20261117/deq_frozen_1k.log
+docs/world/results/synapse_layer_20261117/deq_frozen_1k_best_params.npz
+docs/world/results/synapse_layer_20261117/deq_frozen_1k_params.npz
+docs/world/results/synapse_layer_20261117/deq_learned_5k.log
+docs/world/results/synapse_layer_20261117/deq_learned_5k_best_params.npz
+docs/world/results/synapse_layer_20261117/exp1_kf64_10k.log
+docs/world/results/synapse_layer_20261117/exp1_kf64_10k_best_params.npz
+docs/world/results/synapse_layer_20261117/exp1_sqrt_5k.log
+docs/world/results/synapse_layer_20261117/exp1_sqrt_5k_best_params.npz
+docs/world/results/synapse_layer_20261117/nan_diag_P_vs_R.json
+docs/world/results/synapse_layer_20261117/nan_diag_P_vs_R.log
+docs/world/results/synapse_layer_20261117/q8_base_frozen_1k.json
+docs/world/results/synapse_layer_20261117/q8_base_frozen_1k.log
+docs/world/results/synapse_layer_20261117/q8_base_frozen_1k_best_params.npz
+docs/world/results/synapse_layer_20261117/q8_base_frozen_1k_params.npz
+docs/world/results/synapse_layer_20261117/q8_learned_5k.json
+docs/world/results/synapse_layer_20261117/q8_learned_5k.log
+docs/world/results/synapse_layer_20261117/q8_learned_5k_best_params.npz
+docs/world/results/synapse_layer_20261117/q8_learned_5k_params.npz
+docs/world/results/synapse_layer_20261117/q8_r0_10k.log
+docs/world/results/synapse_layer_20261117/q8_r0_10k_best_params.npz
+docs/world/results/synapse_layer_20261117/spec1.json
+docs/world/results/synapse_layer_20261117/spec1.log
+docs/world/results/synapse_layer_20261117/spec1_params.npz
+docs/world/results/synapse_layer_20261117/token.json
+docs/world/results/synapse_layer_20261117/token.log
+docs/world/results/synapse_layer_20261117/token_params.npz
+docs/world/results/synapse_layer_20261117/wm_joint_10k.json
+docs/world/results/synapse_layer_20261117/wm_joint_10k.log
+docs/world/results/synapse_layer_20261117/wm_joint_10k_best_params.npz
+docs/world/results/synapse_layer_20261117/wm_joint_10k_params.npz
+docs/world/results/synapse_layer_20261117/wm_joint_diag_P.json
+docs/world/results/synapse_layer_20261117/wm_joint_diag_P.log
+docs/world/results/synapse_layer_20261117/wm_joint_stab.json
+docs/world/results/synapse_layer_20261117/wm_joint_stab.log
+docs/world/results/synapse_layer_20261117/wm_joint_stab_best_params.npz
+docs/world/results/synapse_layer_20261117/wm_joint_stab_params.npz
+docs/world/results/synapse_layer_20261117/wm_q8.npz
+docs/world/results/synapse_layer_20261117/zero_trace_judge.json
+docs/world/results/synapse_layer_20261117/zero_trace_judge.log
+scripts/world/diag_20261117/synapse_cellkey.py
+scripts/world/diag_20261117/synapse_layer.py
+scripts/world/diag_20261117/synapse_token.py
+scripts/world/diag_20261117/synapse_wm_joint.py
+
+ succeeded in 0ms:
+     1	# 월드 모델 + 시냅스 동시 학습 (사전학습 없음), 2026-11-17. 명세: docs/world/spec_wm_joint.md
+     2	#   월드 모델 예측 ŷ = F₀(o, a) + m + G(o, a, m)
+     3	#     F₀: 기억 없는 예측 (무작위 초기화, 함께 학습). 쓰기 기준: r = feat(o') − F₀(o, a)
+     4	#     m: 시냅스 읽기 (칸마다 M_p z_p, 쓰기 전), 예측에 그대로 더함 (지름길)
+     5	#     G: 기억을 입력으로 받아 해석을 고치는 망, 마지막 층 0 (처음에는 ŷ = F₀ + m)
+     6	#   흔적은 월드 모델에 넣지 않음 (주소에만). 시냅스 쓰기·키·흔적은 synapse_cellkey.py (칸별 키, 칸별 칼만) 그대로, R₀ 8비트.
+     7	#   목적: 순차 NLL Σ ½[‖r − m − G‖²/S + 8 log S], S = R₀ + R_p + zᵀPz. 칼만 쓰기는 r − m (G 없음, 쓰기 규칙 그대로).
+     8	# 환경변수: ITERS (기본 10000), JUDGE_EVERY (500), OUT
+     9	import sys, os, json, time, functools; sys.path.insert(0, '/workspace/RL-TDP')
+    10	import jax, jax.numpy as jnp, numpy as np, optax
+    11	from rltdp.world import errand as ER, errand_learned as EL, errand_prec as EP, errand_reuse as RU
+    12	
+    13	ER.PUBLIC = False
+    14	We, ybar = EL.emb_fixed(0)
+    15	p0 = EP.init(jax.random.PRNGKey(0))                       # 사전학습 없음. 쓰는 것은 고정 난수 키 초기값 Wr뿐 (12.13과 같은 시드)
+    16	NP, H, KD, NPOLE = EP.NP, EP.H, EP.DK, 2
+    17	DZ, DW, HY = NPOLE * KD, 9 * EP.H, EP.NP * EP.H
+    18	R0 = float(np.mean(np.sum(np.array(We) ** 2, 0))) / 255.0 ** 2 / 12.0
+    19	print("R0", R0, flush=True)
+    20	
+    21	
+    22	def feat(o):
+    23	    return ((o @ We) - ybar).reshape(NP, H)
+    24	
+    25	
+    26	phi = (ER.TEX[ER.ITEM0:ER.ITEM0 + 3].reshape(3, -1) @ We) - ybar
+    27	gB = phi[1] - phi.mean(0)
+    28	p13 = json.loads(open('/workspace/RL-TDP/docs/world/results/errand_diag_20261115b/eb_process_noise.log').read().strip().splitlines()[-1])
+    29	
+    30	ks = jax.random.split(jax.random.PRNGKey(11), 6)
+    31	nrm = lambda k, i, o, s=1.0: jax.random.normal(k, (i, o)) * s / np.sqrt(i)
+    32	kp = dict(W1=nrm(ks[0], DW + NP, 128), b1=jnp.zeros(128), W2=jnp.zeros((128, DW)), b2=jnp.zeros(DW),
+    33	          Wk=jnp.array(p0["Wr"]), lw=jnp.zeros(DW + ER.NA + NP), lb=jnp.zeros(()),
+    34	          ta=jnp.array(np.log(2.0 ** (-1 / 8) / (1 - 2.0 ** (-1 / 8)))))
+    35	wp = dict(F1=nrm(ks[1], HY + ER.NA, 256), Fb1=jnp.zeros(256), F2=nrm(ks[2], 256, HY, 0.1), Fb2=jnp.zeros(HY),     # F₀ (EP.init의 월드 모델 꼴)
+    36	          G1=nrm(ks[3], 2 * HY + ER.NA, 256), Gb1=jnp.zeros(256), G2=jnp.zeros((256, HY)), Gb2=jnp.zeros(HY))       # G, 마지막 층 0
+    37	kf = dict(ls=jnp.log(jnp.array(p13["sigma2"])), lr=jnp.log(jnp.array(p13["R"])), lq=jnp.log(jnp.array(p13["q"])))
+    38	th = jax.tree_util.tree_map(lambda x: jnp.asarray(x, jnp.float32), dict(kp=kp, wp=wp, kf=kf))
+    39	POS = jnp.eye(NP, dtype=jnp.float32)
+    40	
+    41	
+    42	def F0(wp, o, a):
+    43	    x = jnp.concatenate([feat(o).reshape(-1), jax.nn.one_hot(a, ER.NA)])
+    44	    return (jax.nn.relu(x @ wp["F1"] + wp["Fb1"]) @ wp["F2"] + wp["Fb2"]).reshape(NP, H)
+    45	
+    46	
+    47	def G(wp, o, a, m):
+    48	    x = jnp.concatenate([feat(o).reshape(-1), jax.nn.one_hot(a, ER.NA), m.reshape(-1)])
+    49	    return (jax.nn.silu(x @ wp["G1"] + wp["Gb1"]) @ wp["G2"] + wp["Gb2"]).reshape(NP, H)
+    50	
+    51	
+    52	def key_fn(kp, o, a):
+    53	    w = feat(o)[:9].reshape(-1)
+    54	    wpos = jnp.concatenate([jnp.tile(w, (NP, 1)), POS], -1)
+    55	    u = w + jax.nn.silu(wpos @ kp["W1"] + kp["b1"]) @ kp["W2"] + kp["b2"]
+    56	    kh = u @ kp["Wk"][a].T
+    57	    li = jnp.concatenate([jnp.tile(jnp.concatenate([w, jax.nn.one_hot(a, ER.NA)]), (NP, 1)), POS], -1)
+    58	    ell = li @ kp["lw"] + kp["lb"]
+    59	    return jnp.exp(ell)[:, None] * kh / (jnp.linalg.norm(kh, axis=-1, keepdims=True) + 1e-8), ell
+    60	
+    61	
+    62	def step_e(kp, e, o, a):
+    63	    k, ell = key_fn(kp, o, a)
+    64	    return jnp.stack([k, jax.nn.sigmoid(kp["ta"]) * e[:, 1] + k], 1), ell
+    65	
+    66	
+    67	def write(th, O, acts, stop_t):
+    68	    kp, wp, kf = th["kp"], th["wp"], th["kf"]
+    69	    R, Q, sg = jnp.exp(kf["lr"]), jnp.exp(kf["lq"]), jnp.exp(0.5 * kf["ls"])
+    70	
+    71	    @jax.checkpoint
+    72	    def f(c, x):
+    73	        M, P, e = c
+    74	        o, a, o2, t = x
+    75	        e, ell = step_e(kp, e, o, a)
+    76	        r = feat(o2) - F0(wp, o, a)                                       # 쓰기 기준: 기억 없는 예측의 잔차
+    77	        Z = sg[:, None] * e.reshape(NP, -1)                               # [12, DZ]
+    78	        Pq = P + Q[:, None, None] * jnp.eye(DZ)
+    79	        m = jnp.einsum('phd,pd->ph', M, Z)                                # 쓰기 전 읽기 [12, 8]
+    80	        g_ = G(wp, o, a, m)
+    81	        # 대칭화 (Pq + Pqᵀ)/2는 역전파에서 P 덩어리 전치 복사 (12GB)를 만들어 OOM → 쓰지 않음
+    82	        PZ = jnp.einsum('pij,pj->pi', Pq, Z, precision='highest'); S = R + R0 + jnp.sum(Z * PZ, -1)   # TF32 아닌 FP32
+    83	        err_w = r - m                                                     # 칼만 쓰기 (G 없음)
+    84	        err = r - m - g_                                                  # 월드 모델 예측 오차
+    85	        nll = 0.5 * (jnp.sum(err ** 2, -1) / S + H * jnp.log(S))
+    86	        M2 = M + jnp.einsum('ph,pd->phd', err_w, PZ / S[:, None])
+    87	        P2 = Pq - jnp.einsum('pi,pj->pij', PZ, PZ) / S[:, None, None]
+    88	        keep = t > stop_t
+    89	        return (jnp.where(keep, M, M2), jnp.where(keep, P, P2), e), (jnp.where(keep, 0.0, nll.sum()), ell[EP.SLOT])
+    90	    c0 = (jnp.zeros((NP, H, DZ)), jnp.tile(jnp.eye(DZ), (NP, 1, 1)), jnp.zeros((NP, NPOLE, KD)))
+    91	    return jax.lax.scan(f, c0, (O[:-1], acts, O[1:], jnp.arange(acts.shape[0])))
+    92	
+    93	
+    94	def sess_nll(th, sess):
+    95	    O, _, _ = EL.observe_stream(sess)
+    96	    _, (nll, _) = write(th, O, sess["acts"], 10 ** 9)
+    97	    return nll.sum()
+    98	
+    99	
+   100	_, tr = EL.stack_sessions(range(50_000, 51_024), 256)
+   101	_, va = EL.stack_sessions(range(51_024, 51_152), 256)
+   102	print("lengths: train", tr["acts"].shape, "val", va["acts"].shape, flush=True)
+   103	
+   104	
+   105	DIAG = os.environ.get('DIAG')          # P 진단: 체크포인트로 학습 세계 64개 순전파, 칸별 zᵀPz·S·P 최소 고유값
+   106	if DIAG:
+   107	    _z = np.load(DIAG); thD = {a: {b: jnp.array(_z[f"{a}/{b}"]) for b in th[a]} for a in th}
+   108	    def diag_one(sess):
+   109	        kp, wp, kf = thD["kp"], thD["wp"], thD["kf"]
+   110	        R, Q, sg = jnp.exp(kf["lr"]), jnp.exp(kf["lq"]), jnp.exp(0.5 * kf["ls"])
+   111	        O, _, _ = EL.observe_stream(sess)
+   112	        def f(c, x):
+   113	            M, P, e = c
+   114	            o, a, o2 = x
+   115	            e, _ = step_e(kp, e, o, a)
+   116	            r = feat(o2) - F0(wp, o, a)
+   117	            Z = sg[:, None] * e.reshape(NP, -1)
+   118	            Pq = P + Q[:, None, None] * jnp.eye(DZ)
+   119	            m = jnp.einsum('phd,pd->ph', M, Z)
+   120	            PZ = jnp.einsum('pij,pj->pi', Pq, Z); zPz = jnp.sum(Z * PZ, -1); S = R + R0 + zPz
+   121	            M2 = M + jnp.einsum('ph,pd->phd', r - m, PZ / S[:, None])
+   122	            P2 = Pq - jnp.einsum('pi,pj->pij', PZ, PZ) / S[:, None, None]
+   123	            return (M2, P2, e), (zPz, S, jnp.sum((r - m) ** 2, -1) / S, jnp.sum(Z * Z, -1))
+   124	        c0 = (jnp.zeros((NP, H, DZ)), jnp.tile(jnp.eye(DZ), (NP, 1, 1)), jnp.zeros((NP, NPOLE, KD)))
+   125	        (M, P, _), (zPz, S, e2, zz) = jax.lax.scan(f, c0, (O[:-1], sess["acts"], O[1:]))
+   126	        eig = jax.vmap(lambda A: jnp.linalg.eigvalsh(0.5 * (A + A.T))[0])(P)
+   127	        return zPz.min(0), (zPz < 0).mean(0), S.min(0), e2.max(0), eig, zz.max(0), jnp.all(jnp.isfinite(P))
+   128	    dj = jax.jit(jax.vmap(diag_one))
+   129	    outs = [dj(jax.tree_util.tree_map(lambda x: x[i:i + 16], tr)) for i in range(0, 64, 16)]
+   130	    zmin, zneg, smin, e2max, eig, zzmax, fin = [np.concatenate([np.array(o[j]) for o in outs]) for j in range(7)]
+   131	    R_ = np.exp(np.array(thD["kf"]["lr"]))
+   132	    rep = dict(ckpt=DIAG, R0=R0, R=R_.tolist(), zPz_min=zmin.min(0).tolist(), frac_steps_zPz_negative=zneg.mean(0).tolist(),
+   133	               sessions_with_negative_zPz=int((zneg.max(1) > 0).sum()), S_min=smin.min(0).tolist(),
+   134	               max_err2_over_S=e2max.max(0).tolist(), P_eigmin_end=eig.min(0).tolist(), max_z_sq=zzmax.max(0).tolist(),
+   135	               P_all_finite=bool(fin.all()))
+   136	    for k, v in rep.items():
+   137	        print(k, ["%.3g" % x for x in v] if isinstance(v, list) else v, flush=True)
+   138	    json.dump(rep, open(os.environ['OUT'], 'w'), indent=1)
+   139	    sys.exit(0)
+   140	
+   141	
+   142	@jax.jit
+   143	def val_nll(th):
+   144	    def chunk(c, idx):
+   145	        sb = jax.tree_util.tree_map(lambda x: jax.lax.dynamic_slice_in_dim(x, idx, 16), va)
+   146	        return c + jax.vmap(lambda s: sess_nll(th, s))(sb).sum(), None
+   147	    tot, _ = jax.lax.scan(chunk, 0.0, jnp.arange(0, 128, 16))
+   148	    return tot / 128
+   149	
+   150	
+   151	sessions, stack = EL.stack_sessions(range(1000, 1256), 256)
+   152	plans, arrive = EL.plans_for(sessions)
+   153	b1, b0 = np.array(stack["b1"]), np.array(stack["b0"])
+   154	
+   155	
+   156	def judge_one(th, sess, plans, ai_all):
+   157	    """세 가지 읽기로 판정: syn = 시냅스 읽기 m (기존 판정과 같음), wm = m + G (월드 모델의 기억 몫), wm0 = G(m=0) (기억 끔)."""
+   158	    kp, wp, kf = th["kp"], th["wp"], th["kf"]
+   159	    sg = jnp.exp(0.5 * kf["ls"])
+   160	    O, s_end, _ = EL.observe_stream(sess)
+   161	    t_c = RU.last_arrival(O)
+   162	    (M, P, e), _ = write(th, O, sess["acts"], t_c)
+   163	
+   164	    def sim(plan, ai):
+   165	        def f(c, a):
+   166	            s, o, e = c
+   167	            e, _ = step_e(kp, e, o, a)
+   168	            Z = sg[:, None] * e.reshape(NP, -1)
+   169	            m = jnp.einsum('phd,pd->ph', M, Z)
+   170	            out = jnp.stack([m[EP.SLOT], (m + G(wp, o, a, m))[EP.SLOT], G(wp, o, a, jnp.zeros_like(m))[EP.SLOT]])
+   171	            s2, o2, _, _ = ER.env_step(s, a, jnp.array(1), sess["rid"][-1], jnp.array(False), sess["b0"])
+   172	            return (s2, o2, e), out
+   173	        _, YH = jax.lax.scan(f, (s_end, O[-1], e), plan)
+   174	        yh = YH[ai]                                                        # [3, 8]
+   175	        return (yh @ gB) / (jnp.linalg.norm(yh, axis=-1) * jnp.linalg.norm(gB) + 1e-8)
+   176	    return jax.vmap(sim)(plans, ai_all)                                     # [NSITE, 3]
+   177	
+   178	
+   179	@jax.jit
+   180	def judge_chunk(th, sb, pl, ar):
+   181	    return jax.vmap(lambda s, a, b: judge_one(th, s, a, b))(sb, pl, ar)
+   182	
+   183	
+   184	def judge(th):
+   185	    sc = np.concatenate([np.array(judge_chunk(th, jax.tree_util.tree_map(lambda x: x[i:i + 32], stack), plans[i:i + 32], arrive[i:i + 32]))
+   186	                         for i in range(0, 256, 32)])                       # [256, NSITE, 3]
+   187	    out = {}
+   188	    for j, name in enumerate(["syn", "wm", "wm_memoff"]):
+   189	        x = sc[:, :, j]
+   190	        best = (x + 1e-9 * np.random.default_rng(0).random(x.shape)).argmax(1)
+   191	        out[name] = dict(b1=float(np.mean(best == b1)), b0=float(np.mean(best == b0)),
+   192	                         other=float(np.mean((best != b1) & (best != b0))), per_world_b1=(best == b1).astype(int).tolist())
+   193	    return out
+   194	
+   195	
+   196	def fmt(j):
+   197	    return "  ".join(f"{k}: b1 {v['b1']:.4f} b0 {v['b0']:.4f} other {v['other']:.4f}" for k, v in j.items())
+   198	
+   199	
+   200	OUT = os.environ.get('OUT', '/workspace/RL-TDP/docs/world/results/synapse_layer_20261117/wm_joint.json')
+   201	t0 = time.time()
+   202	v0 = float(val_nll(th)); j0 = judge(th)
+   203	print(f"[start = 무작위 월드 모델 + 12.13 칼만 값 + 무작위 키] val_nll {v0:.1f}  {fmt(j0)}  ({time.time()-t0:.0f}s)", flush=True)
+   204	ITERS = int(os.environ.get('ITERS', 10000)); JE = int(os.environ.get('JUDGE_EVERY', 500))
+   205	opt = optax.multi_transform({"kp": optax.adam(1e-3), "wp": optax.adam(1e-3), "kf": optax.adam(0.05)}, {"kp": "kp", "wp": "wp", "kf": "kf"})
+   206	st = opt.init(th)
+   207	
+   208	
+   209	@jax.jit
+   210	def upd(th, st, idx):
+   211	    def lf(th):
+   212	        sb = jax.tree_util.tree_map(lambda x: x[idx], tr)
+   213	        return jax.vmap(lambda s: sess_nll(th, s))(sb).mean()
+   214	    l, g = jax.value_and_grad(lf)(th)
+   215	    g, st = opt.update(g, st, th)
+   216	    return optax.apply_updates(th, g), st, l
+   217	
+   218	
+   219	def save(path, t_):
+   220	    np.savez(path, **{f"{a}/{b}": np.array(v) for a in t_ for b, v in t_[a].items()})
+   221	
+   222	
+   223	curve = [dict(it=0, val_nll=v0)]
+   224	best_v, best_th, best_it = v0, th, 0
+   225	rk = jax.random.PRNGKey(5)
+   226	for it in range(1, ITERS + 1):
+   227	    rk, k = jax.random.split(rk)
+   228	    th, st, l = upd(th, st, jax.random.randint(k, (8,), 0, 1024))
+   229	    if it <= 3 or it == 10:
+   230	        print(f"  [time] it {it} loss {float(l):.1f} ({time.time()-t0:.1f}s)", flush=True)
+   231	    if not np.isfinite(float(l)):
+   232	        print("nan at", it, flush=True); break
+   233	    if it % 100 == 0:
+   234	        v = float(val_nll(th))
+   235	        curve.append(dict(it=it, val_nll=v, train_nll=float(l)))
+   236	        if v < best_v:
+   237	            best_v, best_th, best_it = v, th, it
+   238	            save(OUT.replace('.json', '_best_params.npz'), best_th)
+   239	        print(f"it {it} train {float(l):.1f} val {v:.1f} best {best_v:.1f}@{best_it} half_life {float(-np.log(2)/np.log(jax.nn.sigmoid(th['kp']['ta']))):.2f} ({time.time()-t0:.0f}s)", flush=True)
+   240	        if it % JE == 0:
+   241	            jj = judge(th)
+   242	            curve[-1].update(judge={k: {kk: vv for kk, vv in v_.items() if kk != 'per_world_b1'} for k, v_ in jj.items()})
+   243	            print(f"  [judge it {it}] {fmt(jj)}", flush=True)
+   244	
+   245	j1 = judge(best_th)
+   246	res = dict(spec="wm_joint", R0=R0, before=dict(val_nll=v0, judge=j0), after=dict(val_nll=best_v, best_it=best_it, judge=j1,
+   247	           sigma2=np.exp(np.array(best_th["kf"]["ls"])).tolist(), R=np.exp(np.array(best_th["kf"]["lr"])).tolist(),
+   248	           q=np.exp(np.array(best_th["kf"]["lq"])).tolist()), curve=curve)
+   249	print(f"[after] val_nll {best_v:.1f}@{best_it}  {fmt(j1)}", flush=True)
+   250	json.dump(res, open(OUT, 'w'))
+   251	save(OUT.replace('.json', '_params.npz'), best_th)
+
+web search: 
+web search: Kalman filter compensated summation covariance single precision double single arithmetic numerical stability ...
+exec
+/bin/bash -lc "jq '{best_it:.after.best_it,q:.after.q,R:.after.R,sigma2:.after.sigma2}' docs/world/results/synapse_layer_20261117/wm_joint_10k.json && tail -n 6 docs/world/results/synapse_layer_20261117/wm_joint_stab.log && sed -n '29,43p' rltdp/world/env.py" in /workspace/RL-TDP
+ succeeded in 0ms:
+{
+  "best_it": 900,
+  "q": [
+    1.765423363053742E-10,
+    2.010481781056228E-10,
+    1.4785987711984916E-10,
+    2.1173446329569856E-10,
+    3.507342472008901E-10,
+    1.7911223892941308E-10,
+    1.4989186281066935E-10,
+    1.6663602442346104E-10,
+    1.445507324948636E-10,
+    1.826384163905459E-7,
+    0.002782096154987812,
+    0.0024321270175278187
+  ],
+  "R": [
+    3.780477708659191E-9,
+    3.755059374555003E-9,
+    3.3958766909591986E-9,
+    3.9206513591238945E-9,
+    2.1114294757040852E-9,
+    4.03463484843769E-9,
+    5.109184630924801E-9,
+    3.4571920881631968E-9,
+    3.492484523803796E-9,
+    1.1378045172705242E-8,
+    0.000006702023256366374,
+    8.454384214928723E-8
+  ],
+  "sigma2": [
+    0.03980648145079613,
+    0.03143971413373947,
+    0.03823089599609375,
+    0.031122177839279175,
+    0.01673702895641327,
+    0.03122534602880478,
+    0.03902324661612511,
+    0.031672634184360504,
+    0.03768918663263321,
+    0.00004918931517750025,
+    0.008268313482403755,
+    0.005071205087006092
+  ]
+}
+it 600 train -277724.5 val -274988.8 best -274988.8@600 half_life 8.46 (120s)
+it 700 train -279149.6 val -275506.0 best -275506.0@700 half_life 8.77 (133s)
+it 800 train -278616.1 val -275490.9 best -275506.0@700 half_life 9.07 (146s)
+it 900 train -280471.6 val -276795.3 best -276795.3@900 half_life 9.34 (159s)
+nan at 915
+[after] val_nll -276795.3@900  syn: b1 0.2188 b0 0.3594 other 0.4219  wm: b1 0.2188 b0 0.3164 other 0.4648  wm_memoff: b1 0.1836 b0 0.1758 other 0.6406
+
+MOVES = jnp.array([[0, 1], [0, -1], [1, 0], [-1, 0]])
+
+
+def textures(cfg: EnvCfg, seed=0):
+    """타일 무늬 [n_types + 1, P, P, 3]. 0번은 벽 (어두움). 학습과 평가에서 같은 무늬를 쓴다."""
+    k1, k2 = jax.random.split(jax.random.PRNGKey(seed))
+    base = jax.random.uniform(k1, (cfg.n_types + 1, 1, 1, 3))
+    tex = 0.6 * base + 0.4 * jax.random.uniform(k2, (cfg.n_types + 1, cfg.P, cfg.P, 3))
+    tex = tex.at[0].set(0.05)
+    # 8비트 양자화 (2026-11-17부터 기본): 실제 영상 (Craftax·Minecraft)처럼 픽셀값을 k/255로. 이전 결과는 양자화 없는 float32 무늬였다.
+    return jnp.round(tex * 255.0) / 255.0
+
+
+def reset(key, cfg: EnvCfg):
+
+codex
+**1번 중간 답변 — 주원인은 작은 수 자체가 아니라, 큰 공분산에서 작은 방향별 분산을 빼기로 보존해야 하는 구조입니다.**
+
+가장 중요한 추가 사실은 동시 학습판의 시야 칸 q가 900반복에서 **약 \(1.4\!\times\!10^{-10}\)–\(3.5\!\times\!10^{-10}\)**까지 내려갔다는 점입니다. R₀가 있어도 이 q에서는 잘 관측된 방향의 사후 분산이 float32로 다루기 어려운 수준까지 내려갈 수 있습니다. [저장된 매개변수](/workspace/RL-TDP/docs/world/results/synapse_layer_20261117/wm_joint_10k.json)
+
+유효 관측 잡음을 \(\rho=R_0+R\), \(v=P^-z\)라 쓰면 갱신은
+
+\[
+P^+=P^- - vv^\top/(\rho+z^\top P^-z)
+\]
+
+입니다. 정확한 산술에서는 양정치를 유지합니다. 하지만 거의 배운 방향에서는 서로 가까운 두 큰 항을 빼 작은 잔여를 남겨야 합니다. **그 작은 잔여가 다음 스텝의 이득·분산 계산에 다시 사용됩니다.**
+
+이를 한 방향의 반복 관측으로 단순화하면, \(c=\|z\|^2\)일 때 정상 사후 분산은
+
+\[
+p_\infty
+=\frac{-q+\sqrt{q^2+4q\rho/c}}2
+\approx\sqrt{\frac{q\rho}{c}}.
+\]
+
+현재 값 \(\rho\approx1.34\times10^{-6}\), \(q\sim2\times10^{-10}\), \(c=1\)–9를 넣으면 약 \(5\times10^{-9}\)–\(2\times10^{-8}\)입니다. 미관측 방향의 분산이 1 근처에 남는다면 동적 범위가 \(10^8\) 안팎입니다. 이는 실제 스펙트럼 측정값이 아니라 **왜 현재 학습값이 위험한지 보여 주는 단순화 계산**입니다.
+
+float32의 단위 반올림은 약 \(6\times10^{-8}\)입니다. 큰 방향과 작은 방향이 회전된 조밀한 행렬 안에 섞이면, 작은 고유값을 결정하는 성분 조합이 반올림 오차에 묻힐 수 있습니다. qI도 대각 원소가 1 정도인 곳에서는 더한 값이 반올림으로 사라질 수 있습니다.
+
+따라서 다음을 구분해야 합니다.
+
+- **R₀:** 정확한 PSD 공분산을 전제로 S의 바닥을 제공합니다.
+- **q:** 반복 관측 뒤 공분산이 얼마나 작아질지를 좌우합니다.
+- **공분산 수치 표현:** 그 작은 방향별 분산을 실제로 보존할 수 있는지를 결정합니다.
+
+R₀ 하나로 뒤의 두 문제까지 해결되지는 않습니다. P의 계산 오차가 음의 방향을 만들면 S도 R₀ 아래로 내려갈 수 있습니다.
+
+**다만 현재 기록으로 ‘958반복 NaN의 최초 발생 지점’을 확정할 수는 없습니다.**
+
+900반복 진단에서는 \(z^\top Pz\)가 음수가 됐지만 S는 모두 양수였습니다. 최소 S는 약 \(1.31\times10^{-6}\)입니다. 그 체크포인트에서 `log(S)`가 깨진 것은 아닙니다. 또한 현재 코드는 기울기·Adam 상태·갱신 후 매개변수의 유한성을 검사하지 않으므로, 이후의 최초 오류가 정방향인지 역전파인지 구분되지 않습니다. 진단 경로의 Pz 정밀도도 현재 학습 경로와 다릅니다. [진단 파일](/workspace/RL-TDP/docs/world/results/synapse_layer_20261117/wm_joint_diag_P.json), [학습·검사 코드](/workspace/RL-TDP/scripts/world/diag_20261117/synapse_wm_joint.py:209)
+
+역전파는 위험을 증폭할 수 있습니다.
+
+\[
+\frac{\partial\ell}{\partial S}
+=\frac12\left(\frac{H}{S}-\frac{\|\epsilon\|^2}{S^2}\right).
+\]
+
+하지만 \(S\sim10^{-6}\) 자체는 float32의 표현 범위 안입니다. **작은 S가 곧 underflow라는 설명은 틀립니다.** 문제는 조건이 나쁜 반복 계산과 그 미분입니다.
+
+현재까지의 우선순위는 **학습이 만든 큰 동적 범위 + 공분산 빼기 갱신의 수치 취약성**이 주원인 후보이고, 역전파는 별도 확인이 필요한 증폭 경로입니다. TF32 제거가 해결하지 못한 것도 이 설명과 맞습니다.
+
+web search: 
+web search: Thornton Bierman UDU time update diagonal Q computational complexity n cubed n squared ...
+web search: 
+web search: Longhorn State Space Models Amortize Online Learning arxiv paper 2407.14207 implicit update ...
+codex
+**2번 중간 답변 — 보통의 딥러닝은 같은 수치 문제를 더 잘 푸는 것이 아니라, 대체로 그 문제를 만들지 않는 구조를 씁니다.**
+
+DeltaNet류의 내용 행렬 M에도 빼기 갱신은 있습니다. 차이는 **작은 고유값까지 정확히 양수여야 하는 공분산 P를 별도로 유지하고, 그 값을 분모·로그·다음 이득에 재사용하느냐**입니다.
+
+| 계열 | 현재 모델과 다른 점 |
+|---|---|
+| Transformer | KV를 보존하고 어텐션을 계산합니다. 조밀 공분산을 반복 차감해 유지하지 않습니다. |
+| 일반 RNN | 은닉 활성의 재귀입니다. 학습 불안정은 생길 수 있지만, 같은 PSD 공분산 불변식을 유지하는 문제는 없습니다. |
+| DeltaNet·Gated DeltaNet | 정규화된 키와 제한된 쓰기 계수로 내용 행렬을 갱신합니다. P의 작은 고유값을 유지하지 않습니다. |
+| Longhorn | implicit step으로 갱신 크기를 제한하며, 실제 모형에서는 대각 전이 근사를 사용합니다. 누적 조밀 P를 가진 RLS가 아닙니다. |
+| Kalman Linear Attention | 공분산이 처음부터 대각인 모형을 사용합니다. |
+| Kalman Delta Networks | 정확한 조밀 공분산을 기준으로 두되, 빠른 구현은 대각·등방 근사로 바꿉니다. |
+
+Gated DeltaNet의 대표적인 전이는
+
+\[
+M_t=\alpha_tM_{t-1}(I-\beta_tk_tk_t^\top)
++\beta_tv_tk_t^\top
+\]
+
+입니다. 단위 키에서 \(I-\beta kk^\top\)의 고유값은 키 방향 \(1-\beta\), 직교 방향 1입니다. 통상 범위의 β와 α에서는 과도한 확대를 제한할 수 있습니다. 이 연산자 해석은 직접 유도한 것입니다. 원문은 키·질의 L2 정규화를 학습 안정성에 사용하며, 공식 구현은 주요 상태·역전파 누산을 FP32로 처리합니다. [Gated DeltaNet 원문](https://arxiv.org/html/2412.06464v3), [공식 커널](https://github.com/NVlabs/GatedDeltaNet/blob/main/lit_gpt/gated_delta_rule_ops/chunk.py)
+
+Longhorn은
+
+\[
+\Delta=\frac{\beta}{1+\beta\|k\|^2}
+\]
+
+로 \(\Delta\|k\|^2<1\)을 만듭니다. 실제 병렬 모형은 \(I-\Delta kk^\top\)를 대각 전이로 근사합니다. 역행렬을 유도에 쓴다는 이유로 현재의 조밀 공분산 문제를 해결한 사례로 보면 안 됩니다. [Longhorn 원문](https://arxiv.org/html/2407.14207v3)
+
+**최신 칼만 계열도 차이를 명시해야 합니다.**
+
+- KLA는 원문에서 공분산·정밀도가 계속 대각이라고 명시합니다. 그 자체의 모형에서는 정확하지만 현재 레포의 조밀한 키 공분산과는 다른 모형입니다. [KLA 원문](https://arxiv.org/html/2602.10743v2)
+- KDN의 대각 변분 투영은 분산을 다음 양수식으로 갱신합니다.
+
+\[
+p_i^+
+=\left((p_i^-)^{-1}+k_i^2/\rho\right)^{-1}
+=\frac{p_i^-}{1+p_i^-k_i^2/\rho}.
+\]
+
+큰 행렬 두 개의 차로 작은 고유값을 만드는 계산을 피합니다. 대신 키 채널 사이의 사후 상관을 버립니다. [KDN 원문](https://arxiv.org/html/2609.07816v2)
+
+공식 코드에는 관측 분산 바닥, 키 정규화, FP32 계산, 스캔의 크기 정규화도 있습니다. KDN의 실용판은 추가 정보 배율까지 사용합니다. 이 설정을 그대로 가져오면 현재 모형과 경험적 베이즈의 의미가 바뀝니다.
+
+학습 목적도 다릅니다. 확인한 KLA·KDN의 언어모델 학습은 출력 토큰의 교차엔트로피를 사용합니다. 현재처럼 내부 연속 특징의 \(H\log S\)를 직접 줄이는 경험적 베이즈와 같지 않습니다.
+
+따라서 **“다른 모델은 같은 조밀 칼만 계산을 float32로 안정하게 한다”는 선례는 확인하지 못했습니다.** 확인한 모델들은 계산 구조·불확실성 근사·누산 정밀도·학습 목적을 달리합니다. 이들도 NaN이 없다고 보장되는 것은 아닙니다.
+
+web search: 
+web search: https://chxyike.wordpress.com/wp-content/uploads/2018/11/bierman1976.pdf
+codex
+**3번 중간 답변 — 해법은 ‘같은 필터의 산술을 바꾸는 것’과 ‘불확실성 모형을 근사하는 것’을 나눠야 합니다.**
+
+먼저 한 가지를 정정할 수 있습니다. **Joseph 형식은 반드시 \(O(d^3)\)일 필요가 없습니다.** 스칼라 관측에서는 저랭크 구조를 이용해 \(O(d^2)\)로 계산할 수 있습니다.
+
+\[
+v=P^-z,\quad S=\rho+z^\top v,\quad g=v/S,
+\]
+
+\[
+T=P^- -gv^\top,
+\]
+
+\[
+P_J^+=T-(Tz)g^\top+\rho gg^\top.
+\]
+
+이는 Joseph 식
+
+\[
+(I-gz^\top)P^-(I-gz^\top)^\top+\rho gg^\top
+\]
+
+을 행렬–벡터 곱과 외적으로 계산한 것입니다. 별도의 조밀 행렬곱이 필요하지 않습니다.
+
+다만 **이것은 저렴한 안정화 후보이지, 현재 동적 범위에서의 PSD 보장은 아닙니다.** T를 만드는 첫 단계부터 상쇄가 있고, 조밀한 P를 float32로 저장하는 한계도 남습니다. 고전 원문도 안정화 공분산형이 일반적으로 개선되지만 인수분해형보다 덜 신뢰할 수 있음을 명시합니다. [Bierman, 1976 — 비용표와 안정성 비교](https://chxyike.wordpress.com/wp-content/uploads/2018/11/bierman1976.pdf)
+
+후보들을 비교하면 다음과 같습니다.
+
+| 후보 | 스텝당 비용·GPU 특성 | 무엇을 보존하거나 바꾸는가 |
+|---|---|---|
+| **저랭크 Joseph** | \(O(d^2)\), GEMV·외적 몇 회 추가 | 같은 칼만 모형·이득·학습 목적. PSD 보장까지는 없음 |
+| **제곱근·UD** | 관측 갱신은 \(O(d^2)\). qI 주입의 인수 갱신은 별도 비용 | 같은 모형을 보존하며 공분산을 인수로 표현 |
+| **칼만 경로 FP64** | \(O(d^2)\), 이 기기에서 약 6배라는 측정 | 같은 모형, 더 큰 정밀도 여유 |
+| **FP32 두 개로 확장 정밀도** | \(O(d^2)\), P 상태 약 두 배, FP32 연산 증가 | 같은 모형. 현대 GPU에서의 실제 이득은 미측정 |
+| **대칭화·삼각 저장** | \(O(d^2)\), 융합 구현 가능 | 비대칭을 줄임. 양정치 손실 자체는 해결하지 못함 |
+| **대각·블록 공분산 근사** | 대각은 \(O(d)\), 블록은 크기에 따라 조절 | 키 채널 사이 사후 상관을 일부 버림 |
+| **q·R의 추가 바닥, 이득 제한** | 저렴함 | 과정·관측 모형 또는 갱신 규칙을 변경 |
+| **스칼라 재척도화** | 저렴함 | 올바르게 변환하면 같은 모형이지만 조건수 자체는 그대로 |
+
+**제곱근·UD의 ‘관측 갱신 \(O(d^2)\)’를 전체 필터 비용으로 읽으면 안 됩니다.** 현재 qI는 full-rank 과정 잡음입니다. 인수에 이를 주입하는 단계까지 무조건 \(O(d^2)\)라고 할 근거는 확인하지 못했습니다. d개의 rank-one 갱신으로 처리하면 일반적으로 \(O(d^3)\)입니다.
+
+확장 정밀도는 다음처럼 작은 정보를 별도로 보존합니다.
+
+\[
+P=P_{\rm hi}+P_{\rm lo}.
+\]
+
+FP32 두 수와 오차 보상 연산으로 약 48비트의 가수를 얻는 방식은 원문에서 확인했습니다. 다만 **P 저장만 두 수로 바꾸면 부족합니다.** Pz·S·이득·차감 항까지의 피드백 경로가 그 정밀도를 유지해야 합니다. 그렇지 않으면 단일 FP32의 오차가 다시 들어옵니다. 현재 레포에서 FP64보다 빠르다는 증거는 없습니다. [GPU 확장 정밀도 원문](https://andrewthall.org/papers/df64_qf128.pdf), [정확한 합·내적의 오차 분석](https://ogilab.w.waseda.jp/ogita/math/doc/2005_OgRuOi.pdf)
+
+대칭화의 13GB 전치 복사는 수학적으로 필수인 저장 비용은 아닙니다. 융합 연산·삼각 저장·미분 구현으로 피할 여지가 있습니다. 그러나 그 메모리 문제를 해결해도 **대칭 행렬이 음의 고유값을 갖는 문제는 남습니다.**
+
+시간 병렬화에서는 대각 칼만 근사가 유리합니다. 반면 Joseph·확장 정밀도는 현재 조밀 리카티 재귀의 산술을 바꾸므로, 기존 병렬화 비용까지 없애지는 않습니다.
+
+현재 조사에서 **동일한 조밀 칼만, 현재의 모든 학습 가능 동적 범위, 단일 FP32, 저렴한 \(O(d^2)\), 강한 안정성 보장**을 한꺼번에 제공하는 검증된 해법은 확인하지 못했습니다.
+
+codex
+**4번 중간 답변 — 권고는 현재 모형을 유지한 \(O(d^2)\) 저랭크 Joseph 갱신을 첫 수치 변경으로 검증하는 것입니다.**
+
+이 권고의 이유는 세 가지입니다.
+
+1. **현재 칼만 원리를 바꾸지 않습니다.** 같은 P·R₀·R·q로 같은 이득을 계산하고, 정확한 산술에서는 같은 평균·공분산을 얻습니다.
+2. **현재 제외했던 후보 중 계산 가능한 빠른 길입니다.** 스칼라 관측의 저랭크 계산은 조밀 \(d^3\) 행렬곱을 요구하지 않습니다.
+3. **새 q 바닥이나 학습 게이트로 원인을 가리지 않습니다.** 성능이 달라진다면 우선 같은 필터의 수치 계산 차이로 해석할 수 있습니다.
+
+단, 이것을 **근본적인 안정성 보장 해법으로 채택하라는 뜻은 아닙니다.** 작은 고유값을 단일 FP32 조밀 행렬에 저장하는 한계는 남습니다. 저랭크 Joseph에서도 기준 오차를 넘는 PSD 손상이 지속된다면, 충분한 정밀도나 인수 표현이 필요하다고 판단해야 합니다. 그 단계에서 빠른 근사를 택하려면 상관 손실을 명시해야 합니다.
+
+검증 기준은 “NaN이 안 났다”보다 엄격해야 합니다.
+
+- 같은 매개변수·자료에서 FP64 기준과 예측·이득·NLL을 비교.
+- 최초 비유한 값이 정방향, 기울기, Adam 상태, 새 매개변수 중 어디서 생겼는지 구분.
+- P의 작은 음의 고유값은 FP32 고유값 계산 오차와 구분.
+- \(z^\top Pz\)와 S의 오차, 역전파 기울기의 일치도도 확인.
+- 총 학습 시간·메모리·기존 판정을 함께 기록.
+
+**동시 학습판에는 수치 문제와 별개로 원리 해석의 제한도 있습니다.**
+
+현재 코드는
+
+\[
+\epsilon_{\rm write}=y-F_0-m,
+\qquad
+\epsilon_{\rm loss}=y-F_0-m-G
+\]
+
+를 사용합니다. 칼만 쓰기는 첫 오차로 하고, R·q를 맞추는 손실은 두 번째 오차를 봅니다. G에 의한 출력 불확실성 변화도 원래 S에 반영하지 않습니다. 따라서 동시 학습판 전체를 동일 선형 가우시안 모형의 **정확한 주변우도·정확한 칼만 사후분포**라고 부를 수는 없습니다. [해당 코드](/workspace/RL-TDP/scripts/world/diag_20261117/synapse_wm_joint.py:83)
+
+G가 출력 오차를 줄이는 동안 쓰기 잔차는 다르게 남을 수 있으므로, 이것은 학습된 잡음·변동성의 의미를 따로 검토해야 할 이유입니다. 다만 이 불일치가 이번 NaN의 직접 원인으로 입증된 것은 아닙니다. 수치 변경 시험에서는 목적까지 동시에 바꾸지 않는 것이 맞습니다.
+
+codex
+**주원인은 칼만이라는 원리보다, 학습이 만든 높은 조건수의 공분산을 단일 float32 행렬의 반복 차감으로 유지하는 수치 표현입니다.** R₀는 이 문제를 완화하지만 해결을 보장하지 않습니다.
+
+보통의 빠른 가중치 모델들은 대체로 같은 공분산 계산을 하지 않습니다. 최신 칼만 계열도 대각 모형·근사·양수식·정규화 등을 사용합니다.
+
+제 권고는 **현재 모형·목적을 유지한 \(O(d^2)\) 저랭크 Joseph 갱신을 첫 수치 변경으로 검증하는 것**입니다. 다만 강한 안정성 보장에는 인수 표현이나 충분한 정밀도가 필요하며, 현재 조건에서 그것까지 저렴하게 만족하는 검증된 해법은 확인하지 못했습니다.
+
+파일 수정·구현·학습·실험 실행 없이 조사했습니다.
+
+**1. 근본 원인은 작은 수의 표현 범위가 아니라, 공분산의 상대 정밀도와 조건수입니다.**
+
+유효 관측 잡음을 \(\rho=R_0+R\)라 쓰면
+
+\[
+P^-=P+qI,\quad v=P^-z,\quad S=\rho+z^\top v,
+\]
+
+\[
+P^+=P^- -\frac{vv^\top}{S}
+\]
+
+입니다. 정확한 산술에서는 양정치를 유지합니다. 문제는 거의 배운 방향의 작은 분산을, 큰 항들의 차로 보존해야 한다는 점입니다. 차감에 들어가는 항의 반올림 오차가 작은 잔여보다 커질 수 있습니다.
+
+고전 칼만 수치해석 문헌도 이 차감과 양정치 손실을 핵심 문제로 지적합니다. 새로 생긴 딥러닝 특유의 현상은 아닙니다. [Bierman, 1976](https://chxyike.wordpress.com/wp-content/uploads/2018/11/bierman1976.pdf)
+
+현재 기록에서 특히 중요한 것은 **동시 학습판의 q**입니다. 900반복 체크포인트의 시야 칸 q는 약
+
+\[
+1.45\times10^{-10}\sim3.51\times10^{-10}
+\]
+
+입니다. R은 수 \(10^{-9}\)이지만, \(\rho\)는 R₀ 때문에 약 \(1.34\times10^{-6}\)입니다. [저장된 결과](/workspace/RL-TDP/docs/world/results/synapse_layer_20261117/wm_joint_10k.json)
+
+동일한 주소를 반복 관측하는 한 방향으로 단순화하면, \(c=\|z\|^2\)일 때 정상 사후 분산은
+
+\[
+p_\infty
+=\frac{-q+\sqrt{q^2+4q\rho/c}}2
+\approx\sqrt{\frac{q\rho}{c}}.
+\]
+
+현재 규모에서 \(q\sim2\times10^{-10}\), \(c=1\)–9이면 약 \(5\times10^{-9}\)–\(2\times10^{-8}\)입니다. 미관측 방향이 사전 분산 1 근처에 남으면 조건수가 \(10^8\) 안팎이 됩니다.
+
+이는 실제 P의 스펙트럼 측정값이 아니라 **왜 현재 학습값이 위험한지 설명하는 근사 계산**입니다. float32 단위 반올림 \(u\approx6\times10^{-8}\)와 비교하면, 회전된 작은 고유값을 조밀 행렬 성분들의 조합으로 보존하기 어렵다는 것을 알 수 있습니다. qI 역시 크기 1 근처의 대각에서는 반올림으로 소실될 수 있습니다.
+
+따라서 역할이 다릅니다.
+
+| 요소 | 보장하는 것과 한계 |
+|---|---|
+| R₀ | 정확한 PSD 공분산을 전제로 S의 바닥을 제공 |
+| q | 반복 관측 뒤 분산이 얼마나 작아지는지에 영향 |
+| 공분산 수치 표현 | 작은 방향별 분산을 실제로 보존할 수 있는지 결정 |
+
+**R₀는 P의 고유값 하한이나 조건수 상한이 아닙니다.**
+
+학습은 이 취약한 영역으로 모형을 이동시킬 수 있습니다. 결정적인 관측을 잘 맞히면 NLL은 작은 예측 분산을 선호합니다. q도 작아지면 R₀가 있어도 공분산의 동적 범위가 커집니다. 새 코드는 실제 8비트 양자화를 적용하지만, 같은 타일은 매번 같은 값입니다. \(\Delta^2/12\)를 독립 관측 잡음으로 사용하는 것은 유효 잡음에 대한 모형 가정이며, 반복 관측마다 실제 잡음을 생성하는 것은 아닙니다. [텍스처 코드](/workspace/RL-TDP/rltdp/world/env.py:33)
+
+역전파는 별도의 증폭 경로입니다.
+
+\[
+\frac{\partial\ell}{\partial S}
+=\frac12\left(\frac{H}{S}-\frac{\|\epsilon\|^2}{S^2}\right).
+\]
+
+또 \(A=I-gz^\top\)라 두면 공분산 갱신의 미분은
+
+\[
+D_PF[\Delta P]=A\Delta PA^\top
+\]
+
+입니다. 사후 공분산이 수축한다는 사실이 긴 역전파의 수치 조건까지 보장하지는 않습니다.
+
+다만 **현재 기록만으로 최초 NaN의 발생 지점은 확정할 수 없습니다.**
+
+- 900반복 진단의 최소 S는 약 \(1.31\times10^{-6}\)으로 모두 양수였습니다.
+- 기울기·Adam 상태·갱신 후 매개변수의 유한성은 검사하지 않습니다.
+- 진단 Pz는 기본 정밀도이고, 현재 학습 Pz는 `highest`라 산술 경로도 완전히 같지 않습니다.
+- 최소 고유값 계산도 FP32이므로, 아주 작은 음수는 고유값 계산 오차와 구분해야 합니다.
+
+따라서 음의 이차형식·고유값은 **정방향 수치 불안정의 강한 신호**이지만, 915/958반복 NaN이 처음부터 `log(S≤0)`에서 시작했다는 증거는 아닙니다. [진단 파일](/workspace/RL-TDP/docs/world/results/synapse_layer_20261117/wm_joint_diag_P.json), [검사 코드](/workspace/RL-TDP/scripts/world/diag_20261117/synapse_wm_joint.py:209)
+
+주원인으로 보기 어려운 설명도 있습니다.
+
+- \(S\sim10^{-6}\) 자체는 float32 underflow가 아닙니다.
+- TF32만의 문제는 아닙니다. FP32 변경 후에도 실패했습니다.
+- 대칭화만으로 양정치 손실을 해결할 수 없습니다.
+- `jax.checkpoint`는 재계산·메모리 전략이며 수치 안정성을 보장하지 않습니다.
+
+**2. 다른 딥러닝 모델들은 주로 이 공분산 문제를 피하는 구조를 사용합니다.**
+
+| 계열 | 현재 모델과의 핵심 차이 |
+|---|---|
+| Transformer | KV를 보존하며, 조밀 공분산을 반복 차감해 유지하지 않음 |
+| 일반 RNN | 은닉 활성 재귀. 같은 PSD 공분산 불변식을 요구하지 않음 |
+| DeltaNet·Gated DeltaNet | 내용 행렬을 갱신하지만 조밀 P를 유지하지 않음 |
+| Longhorn | 제한된 implicit step과 대각 전이 근사 사용 |
+| Kalman Linear Attention | 처음부터 대각 공분산인 모형 |
+| Kalman Delta Networks | 조밀 칼만을 기준으로 두되 빠른 구현은 대각·등방 근사 |
+
+Gated DeltaNet의 대표 전이는
+
+\[
+M_t=\alpha_tM_{t-1}(I-\beta_tk_tk_t^\top)
++\beta_tv_tk_t^\top
+\]
+
+입니다. 단위 키에서 전이의 키 방향 고유값은 \(1-\beta\)입니다. 제한된 계수와 키 정규화로 확대를 제어하며, 공식 구현은 주요 누산에 FP32를 사용합니다. 내용의 상쇄는 생겨도, 작은 음의 공분산 고유값이 다음 분모와 로그로 돌아오는 경로는 없습니다. [원문](https://arxiv.org/html/2412.06464v3), [공식 커널](https://github.com/NVlabs/GatedDeltaNet/blob/main/lit_gpt/gated_delta_rule_ops/chunk.py)
+
+Longhorn은
+
+\[
+\Delta=\frac{\beta}{1+\beta\|k\|^2}
+\]
+
+로 갱신 크기를 제한합니다. 실제 병렬 모형에서는 rank-one 전이를 대각으로 근사합니다. 누적 조밀 P를 유지하는 RLS의 안정 구현과는 다릅니다. [Longhorn 원문](https://arxiv.org/html/2407.14207v3)
+
+KLA는 공분산이 계속 대각임을 명시합니다. KDN의 대각 변분 근사는
+
+\[
+p_i^+
+=\left((p_i^-)^{-1}+k_i^2/\rho\right)^{-1}
+=\frac{p_i^-}{1+p_i^-k_i^2/\rho}
+\]
+
+라는 양수식을 사용합니다. 큰 행렬들의 차로 작은 고유값을 만드는 계산을 피하는 대신, 사후 상관을 버립니다. [KLA 원문](https://arxiv.org/html/2602.10743v2), [KDN 원문](https://arxiv.org/html/2609.07816v2)
+
+공식 구현에는 분산 바닥·정규화·FP32 계산 등도 있습니다. KDN 실용판의 추가 정보 배율은 원래의 정확한 베이즈 갱신과 구분해야 합니다.
+
+학습 목적도 다릅니다. 확인한 KLA·KDN 언어모델 학습은 출력 토큰의 교차엔트로피를 사용합니다. 현재 내부 특징의 가우시안 NLL로 S를 직접 맞추는 경험적 베이즈와 같지 않습니다.
+
+**같은 조밀 칼만 계산을 단순 FP32 차감으로 항상 안정하게 수행하는 대형 딥러닝 선례는 확인하지 못했습니다.** 다른 모델도 NaN이 없다고 보장되지는 않습니다.
+
+**3. 빠른 후보는 있지만, 비용·보장·근사를 구분해야 합니다.**
+
+가장 실용적인 추가 후보는 **저랭크 Joseph 형식**입니다. 스칼라 관측에서는 반드시 \(O(d^3)\) 행렬곱을 할 필요가 없습니다.
+
+\[
+v=P^-z,\quad S=\rho+z^\top v,\quad g=v/S,
+\]
+
+\[
+T=P^- -gv^\top,
+\]
+
+\[
+P_J^+=T-(Tz)g^\top+\rho gg^\top.
+\]
+
+이는
+
+\[
+(I-gz^\top)P^-(I-gz^\top)^\top+\rho gg^\top
+\]
+
+의 \(O(d^2)\) 계산입니다. GEMV와 외적만 필요합니다.
+
+다만 T 단계부터 상쇄가 있으므로, 단일 FP32 조밀 P의 표현 한계까지 없어지지는 않습니다. 고전 원문도 안정화 공분산형이 인수분해형보다 덜 신뢰할 수 있음을 한정합니다. [Bierman의 비용·안정성 비교](https://chxyike.wordpress.com/wp-content/uploads/2018/11/bierman1976.pdf)
+
+| 후보 | 비용·GPU 특성 | 원리와 안정성 |
+|---|---|---|
+| **저랭크 Joseph** | \(O(d^2)\), GEMV·외적 추가 | 같은 모형. 개선 후보이며 PSD 보장까지는 없음 |
+| **제곱근·UD** | 관측 갱신 \(O(d^2)\), qI 주입은 별도 비용 | 같은 모형. 인수 표현으로 PSD 보존 |
+| **칼만 경로 FP64** | \(O(d^2)\), 이 기기에서 약 6배 | 같은 모형, 정밀도 여유 증가 |
+| **FP32 두 수의 확장 정밀도** | \(O(d^2)\), P 상태 약 두 배 | 같은 모형. 현재 기기의 속도·안정성 미측정 |
+| **대칭화·삼각 저장** | \(O(d^2)\), 융합 가능 | 비대칭 감소. PSD 해법은 아님 |
+| **대각·블록 근사** | 대각 \(O(d)\), 블록 크기로 비용 조절 | 사후 상관 일부 소실 |
+| **q·R 바닥 또는 이득 제한 추가** | 저렴함 | 모형·사전 또는 갱신 규칙 변경 |
+
+두 가지 비용 함정을 피해야 합니다.
+
+첫째, **Potter·UD의 관측 갱신 비용을 전체 필터 비용으로 읽으면 안 됩니다.** 현재 qI는 full-rank 과정 잡음입니다. 인수에 이를 주입하는 단계까지 무조건 \(O(d^2)\)라는 근거는 확인하지 못했습니다. d개의 rank-one 갱신이면 일반적으로 \(O(d^3)\)입니다.
+
+둘째, 확장 정밀도는 P 저장만 바꾸는 방법이 아닙니다.
+
+\[
+P=P_{\rm hi}+P_{\rm lo}
+\]
+
+와 오차 보상 연산으로 약 48비트 가수를 얻는 방법은 확인했습니다. 그러나 Pz·S·이득·차감까지 정밀도를 유지해야 합니다. 단일 FP32 이득의 오차를 그대로 넣으면 문제가 다시 생깁니다. RTX 5090에서 FP64보다 빠르다는 증거는 없습니다. [GPU 확장 정밀도](https://andrewthall.org/papers/df64_qf128.pdf), [보상 합·내적의 오차 분석](https://ogilab.w.waseda.jp/ogita/math/doc/2005_OgRuOi.pdf)
+
+대칭화의 13GB 전치 복사는 수학적으로 필수인 저장 비용은 아닙니다. 융합·삼각 저장·미분 구현으로 회피할 여지가 있습니다. 그래도 양정치 손실은 별도로 남습니다.
+
+대각 근사 역시 무손실 해법이 아닙니다. 정확한 칼만은 관측한 키 방향의 분산을 줄이고 직교 방향은 남길 수 있습니다. 대각 근사는 그 구별을 위한 상관을 버립니다. 이 레포의 **키 방향별 새로움과 간섭 보호**가 달라집니다.
+
+시간 병렬화는 대각 근사가 유리합니다. Joseph·확장 정밀도는 기존 조밀 리카티 재귀의 산술을 바꾸며, 병렬 결합 비용까지 없애지는 않습니다.
+
+**4. 권고는 같은 모형의 저랭크 Joseph를 우선 검증하고, 보장 범위를 엄격하게 판단하는 것입니다.**
+
+이 선택은 다음을 유지합니다.
+
+- 칼만 이득을 정하는 P·R₀·R·q.
+- 키 방향 사이의 전체 사후 상관.
+- 현재 매개변수 학습 절차.
+- 새 문턱·이득 제한·q 바닥 없는 갱신.
+
+정확한 산술에서는 같은 필터입니다. 수치 안정화를 위해 통계 모형을 바꾸지 않으므로, 원인 분리에도 적합합니다.
+
+검증은 NaN 유무만으로 판단하면 안 됩니다.
+
+- 같은 매개변수·자료에서 FP64 기준과 예측·이득·NLL 비교.
+- 최초 오류가 정방향·기울기·Adam·새 매개변수 중 어디인지 확인.
+- 저장된 P의 부호와 FP32 이차형식·고유값 평가 오차 구분.
+- 역전파 기울기 일치도와 시간·메모리 측정.
+- 기존 판정 유지.
+
+저랭크 Joseph에서도 허용 오차를 넘는 손상이 지속된다면, **재배열만으로 단일 FP32 조밀 P의 한계를 해결할 수 없다는 판단**이 필요합니다. 그때는 인수 표현·충분한 정밀도 또는 명시적인 근사를 선택해야 합니다. 현재 조사로 빠르고 보장된 해법을 약속할 수는 없습니다.
+
+마지막으로 동시 학습판의 원리 해석에는 별도 제한이 있습니다.
+
+\[
+\epsilon_{\rm write}=y-F_0-m,\qquad
+\epsilon_{\rm loss}=y-F_0-m-G.
+\]
+
+쓰기는 첫 오차로 하고, R·q 학습은 두 번째 오차를 봅니다. G에 따른 출력 불확실성 변화도 S에 반영하지 않습니다. 따라서 전체 동시판은 동일 선형 가우시안 모형의 정확한 주변우도·사후분포가 아닙니다. 이것은 수치 해법과 분리해 검토해야 하며, 이번 NaN의 직접 원인으로 입증된 것은 아닙니다. [코드](/workspace/RL-TDP/scripts/world/diag_20261117/synapse_wm_joint.py:83)
+
+문헌의 관련 수식·절과 공식 구현을 확인했습니다. 조건수 근사·미분식·대각 근사의 손실 설명은 직접 유도한 것입니다. 후보들의 이 레포에서의 안정성·속도는 새로 측정하지 않았으며, 기억에만 의존한 문헌 주장을 근거로 사용하지 않았습니다.
+tokens used
+340,699
+**주원인은 칼만이라는 원리보다, 학습이 만든 높은 조건수의 공분산을 단일 float32 행렬의 반복 차감으로 유지하는 수치 표현입니다.** R₀는 이 문제를 완화하지만 해결을 보장하지 않습니다.
+
+보통의 빠른 가중치 모델들은 대체로 같은 공분산 계산을 하지 않습니다. 최신 칼만 계열도 대각 모형·근사·양수식·정규화 등을 사용합니다.
+
+제 권고는 **현재 모형·목적을 유지한 \(O(d^2)\) 저랭크 Joseph 갱신을 첫 수치 변경으로 검증하는 것**입니다. 다만 강한 안정성 보장에는 인수 표현이나 충분한 정밀도가 필요하며, 현재 조건에서 그것까지 저렴하게 만족하는 검증된 해법은 확인하지 못했습니다.
+
+파일 수정·구현·학습·실험 실행 없이 조사했습니다.
+
+**1. 근본 원인은 작은 수의 표현 범위가 아니라, 공분산의 상대 정밀도와 조건수입니다.**
+
+유효 관측 잡음을 \(\rho=R_0+R\)라 쓰면
+
+\[
+P^-=P+qI,\quad v=P^-z,\quad S=\rho+z^\top v,
+\]
+
+\[
+P^+=P^- -\frac{vv^\top}{S}
+\]
+
+입니다. 정확한 산술에서는 양정치를 유지합니다. 문제는 거의 배운 방향의 작은 분산을, 큰 항들의 차로 보존해야 한다는 점입니다. 차감에 들어가는 항의 반올림 오차가 작은 잔여보다 커질 수 있습니다.
+
+고전 칼만 수치해석 문헌도 이 차감과 양정치 손실을 핵심 문제로 지적합니다. 새로 생긴 딥러닝 특유의 현상은 아닙니다. [Bierman, 1976](https://chxyike.wordpress.com/wp-content/uploads/2018/11/bierman1976.pdf)
+
+현재 기록에서 특히 중요한 것은 **동시 학습판의 q**입니다. 900반복 체크포인트의 시야 칸 q는 약
+
+\[
+1.45\times10^{-10}\sim3.51\times10^{-10}
+\]
+
+입니다. R은 수 \(10^{-9}\)이지만, \(\rho\)는 R₀ 때문에 약 \(1.34\times10^{-6}\)입니다. [저장된 결과](/workspace/RL-TDP/docs/world/results/synapse_layer_20261117/wm_joint_10k.json)
+
+동일한 주소를 반복 관측하는 한 방향으로 단순화하면, \(c=\|z\|^2\)일 때 정상 사후 분산은
+
+\[
+p_\infty
+=\frac{-q+\sqrt{q^2+4q\rho/c}}2
+\approx\sqrt{\frac{q\rho}{c}}.
+\]
+
+현재 규모에서 \(q\sim2\times10^{-10}\), \(c=1\)–9이면 약 \(5\times10^{-9}\)–\(2\times10^{-8}\)입니다. 미관측 방향이 사전 분산 1 근처에 남으면 조건수가 \(10^8\) 안팎이 됩니다.
+
+이는 실제 P의 스펙트럼 측정값이 아니라 **왜 현재 학습값이 위험한지 설명하는 근사 계산**입니다. float32 단위 반올림 \(u\approx6\times10^{-8}\)와 비교하면, 회전된 작은 고유값을 조밀 행렬 성분들의 조합으로 보존하기 어렵다는 것을 알 수 있습니다. qI 역시 크기 1 근처의 대각에서는 반올림으로 소실될 수 있습니다.
+
+따라서 역할이 다릅니다.
+
+| 요소 | 보장하는 것과 한계 |
+|---|---|
+| R₀ | 정확한 PSD 공분산을 전제로 S의 바닥을 제공 |
+| q | 반복 관측 뒤 분산이 얼마나 작아지는지에 영향 |
+| 공분산 수치 표현 | 작은 방향별 분산을 실제로 보존할 수 있는지 결정 |
+
+**R₀는 P의 고유값 하한이나 조건수 상한이 아닙니다.**
+
+학습은 이 취약한 영역으로 모형을 이동시킬 수 있습니다. 결정적인 관측을 잘 맞히면 NLL은 작은 예측 분산을 선호합니다. q도 작아지면 R₀가 있어도 공분산의 동적 범위가 커집니다. 새 코드는 실제 8비트 양자화를 적용하지만, 같은 타일은 매번 같은 값입니다. \(\Delta^2/12\)를 독립 관측 잡음으로 사용하는 것은 유효 잡음에 대한 모형 가정이며, 반복 관측마다 실제 잡음을 생성하는 것은 아닙니다. [텍스처 코드](/workspace/RL-TDP/rltdp/world/env.py:33)
+
+역전파는 별도의 증폭 경로입니다.
+
+\[
+\frac{\partial\ell}{\partial S}
+=\frac12\left(\frac{H}{S}-\frac{\|\epsilon\|^2}{S^2}\right).
+\]
+
+또 \(A=I-gz^\top\)라 두면 공분산 갱신의 미분은
+
+\[
+D_PF[\Delta P]=A\Delta PA^\top
+\]
+
+입니다. 사후 공분산이 수축한다는 사실이 긴 역전파의 수치 조건까지 보장하지는 않습니다.
+
+다만 **현재 기록만으로 최초 NaN의 발생 지점은 확정할 수 없습니다.**
+
+- 900반복 진단의 최소 S는 약 \(1.31\times10^{-6}\)으로 모두 양수였습니다.
+- 기울기·Adam 상태·갱신 후 매개변수의 유한성은 검사하지 않습니다.
+- 진단 Pz는 기본 정밀도이고, 현재 학습 Pz는 `highest`라 산술 경로도 완전히 같지 않습니다.
+- 최소 고유값 계산도 FP32이므로, 아주 작은 음수는 고유값 계산 오차와 구분해야 합니다.
+
+따라서 음의 이차형식·고유값은 **정방향 수치 불안정의 강한 신호**이지만, 915/958반복 NaN이 처음부터 `log(S≤0)`에서 시작했다는 증거는 아닙니다. [진단 파일](/workspace/RL-TDP/docs/world/results/synapse_layer_20261117/wm_joint_diag_P.json), [검사 코드](/workspace/RL-TDP/scripts/world/diag_20261117/synapse_wm_joint.py:209)
+
+주원인으로 보기 어려운 설명도 있습니다.
+
+- \(S\sim10^{-6}\) 자체는 float32 underflow가 아닙니다.
+- TF32만의 문제는 아닙니다. FP32 변경 후에도 실패했습니다.
+- 대칭화만으로 양정치 손실을 해결할 수 없습니다.
+- `jax.checkpoint`는 재계산·메모리 전략이며 수치 안정성을 보장하지 않습니다.
+
+**2. 다른 딥러닝 모델들은 주로 이 공분산 문제를 피하는 구조를 사용합니다.**
+
+| 계열 | 현재 모델과의 핵심 차이 |
+|---|---|
+| Transformer | KV를 보존하며, 조밀 공분산을 반복 차감해 유지하지 않음 |
+| 일반 RNN | 은닉 활성 재귀. 같은 PSD 공분산 불변식을 요구하지 않음 |
+| DeltaNet·Gated DeltaNet | 내용 행렬을 갱신하지만 조밀 P를 유지하지 않음 |
+| Longhorn | 제한된 implicit step과 대각 전이 근사 사용 |
+| Kalman Linear Attention | 처음부터 대각 공분산인 모형 |
+| Kalman Delta Networks | 조밀 칼만을 기준으로 두되 빠른 구현은 대각·등방 근사 |
+
+Gated DeltaNet의 대표 전이는
+
+\[
+M_t=\alpha_tM_{t-1}(I-\beta_tk_tk_t^\top)
++\beta_tv_tk_t^\top
+\]
+
+입니다. 단위 키에서 전이의 키 방향 고유값은 \(1-\beta\)입니다. 제한된 계수와 키 정규화로 확대를 제어하며, 공식 구현은 주요 누산에 FP32를 사용합니다. 내용의 상쇄는 생겨도, 작은 음의 공분산 고유값이 다음 분모와 로그로 돌아오는 경로는 없습니다. [원문](https://arxiv.org/html/2412.06464v3), [공식 커널](https://github.com/NVlabs/GatedDeltaNet/blob/main/lit_gpt/gated_delta_rule_ops/chunk.py)
+
+Longhorn은
+
+\[
+\Delta=\frac{\beta}{1+\beta\|k\|^2}
+\]
+
+로 갱신 크기를 제한합니다. 실제 병렬 모형에서는 rank-one 전이를 대각으로 근사합니다. 누적 조밀 P를 유지하는 RLS의 안정 구현과는 다릅니다. [Longhorn 원문](https://arxiv.org/html/2407.14207v3)
+
+KLA는 공분산이 계속 대각임을 명시합니다. KDN의 대각 변분 근사는
+
+\[
+p_i^+
+=\left((p_i^-)^{-1}+k_i^2/\rho\right)^{-1}
+=\frac{p_i^-}{1+p_i^-k_i^2/\rho}
+\]
+
+라는 양수식을 사용합니다. 큰 행렬들의 차로 작은 고유값을 만드는 계산을 피하는 대신, 사후 상관을 버립니다. [KLA 원문](https://arxiv.org/html/2602.10743v2), [KDN 원문](https://arxiv.org/html/2609.07816v2)
+
+공식 구현에는 분산 바닥·정규화·FP32 계산 등도 있습니다. KDN 실용판의 추가 정보 배율은 원래의 정확한 베이즈 갱신과 구분해야 합니다.
+
+학습 목적도 다릅니다. 확인한 KLA·KDN 언어모델 학습은 출력 토큰의 교차엔트로피를 사용합니다. 현재 내부 특징의 가우시안 NLL로 S를 직접 맞추는 경험적 베이즈와 같지 않습니다.
+
+**같은 조밀 칼만 계산을 단순 FP32 차감으로 항상 안정하게 수행하는 대형 딥러닝 선례는 확인하지 못했습니다.** 다른 모델도 NaN이 없다고 보장되지는 않습니다.
+
+**3. 빠른 후보는 있지만, 비용·보장·근사를 구분해야 합니다.**
+
+가장 실용적인 추가 후보는 **저랭크 Joseph 형식**입니다. 스칼라 관측에서는 반드시 \(O(d^3)\) 행렬곱을 할 필요가 없습니다.
+
+\[
+v=P^-z,\quad S=\rho+z^\top v,\quad g=v/S,
+\]
+
+\[
+T=P^- -gv^\top,
+\]
+
+\[
+P_J^+=T-(Tz)g^\top+\rho gg^\top.
+\]
+
+이는
+
+\[
+(I-gz^\top)P^-(I-gz^\top)^\top+\rho gg^\top
+\]
+
+의 \(O(d^2)\) 계산입니다. GEMV와 외적만 필요합니다.
+
+다만 T 단계부터 상쇄가 있으므로, 단일 FP32 조밀 P의 표현 한계까지 없어지지는 않습니다. 고전 원문도 안정화 공분산형이 인수분해형보다 덜 신뢰할 수 있음을 한정합니다. [Bierman의 비용·안정성 비교](https://chxyike.wordpress.com/wp-content/uploads/2018/11/bierman1976.pdf)
+
+| 후보 | 비용·GPU 특성 | 원리와 안정성 |
+|---|---|---|
+| **저랭크 Joseph** | \(O(d^2)\), GEMV·외적 추가 | 같은 모형. 개선 후보이며 PSD 보장까지는 없음 |
+| **제곱근·UD** | 관측 갱신 \(O(d^2)\), qI 주입은 별도 비용 | 같은 모형. 인수 표현으로 PSD 보존 |
+| **칼만 경로 FP64** | \(O(d^2)\), 이 기기에서 약 6배 | 같은 모형, 정밀도 여유 증가 |
+| **FP32 두 수의 확장 정밀도** | \(O(d^2)\), P 상태 약 두 배 | 같은 모형. 현재 기기의 속도·안정성 미측정 |
+| **대칭화·삼각 저장** | \(O(d^2)\), 융합 가능 | 비대칭 감소. PSD 해법은 아님 |
+| **대각·블록 근사** | 대각 \(O(d)\), 블록 크기로 비용 조절 | 사후 상관 일부 소실 |
+| **q·R 바닥 또는 이득 제한 추가** | 저렴함 | 모형·사전 또는 갱신 규칙 변경 |
+
+두 가지 비용 함정을 피해야 합니다.
+
+첫째, **Potter·UD의 관측 갱신 비용을 전체 필터 비용으로 읽으면 안 됩니다.** 현재 qI는 full-rank 과정 잡음입니다. 인수에 이를 주입하는 단계까지 무조건 \(O(d^2)\)라는 근거는 확인하지 못했습니다. d개의 rank-one 갱신이면 일반적으로 \(O(d^3)\)입니다.
+
+둘째, 확장 정밀도는 P 저장만 바꾸는 방법이 아닙니다.
+
+\[
+P=P_{\rm hi}+P_{\rm lo}
+\]
+
+와 오차 보상 연산으로 약 48비트 가수를 얻는 방법은 확인했습니다. 그러나 Pz·S·이득·차감까지 정밀도를 유지해야 합니다. 단일 FP32 이득의 오차를 그대로 넣으면 문제가 다시 생깁니다. RTX 5090에서 FP64보다 빠르다는 증거는 없습니다. [GPU 확장 정밀도](https://andrewthall.org/papers/df64_qf128.pdf), [보상 합·내적의 오차 분석](https://ogilab.w.waseda.jp/ogita/math/doc/2005_OgRuOi.pdf)
+
+대칭화의 13GB 전치 복사는 수학적으로 필수인 저장 비용은 아닙니다. 융합·삼각 저장·미분 구현으로 회피할 여지가 있습니다. 그래도 양정치 손실은 별도로 남습니다.
+
+대각 근사 역시 무손실 해법이 아닙니다. 정확한 칼만은 관측한 키 방향의 분산을 줄이고 직교 방향은 남길 수 있습니다. 대각 근사는 그 구별을 위한 상관을 버립니다. 이 레포의 **키 방향별 새로움과 간섭 보호**가 달라집니다.
+
+시간 병렬화는 대각 근사가 유리합니다. Joseph·확장 정밀도는 기존 조밀 리카티 재귀의 산술을 바꾸며, 병렬 결합 비용까지 없애지는 않습니다.
+
+**4. 권고는 같은 모형의 저랭크 Joseph를 우선 검증하고, 보장 범위를 엄격하게 판단하는 것입니다.**
+
+이 선택은 다음을 유지합니다.
+
+- 칼만 이득을 정하는 P·R₀·R·q.
+- 키 방향 사이의 전체 사후 상관.
+- 현재 매개변수 학습 절차.
+- 새 문턱·이득 제한·q 바닥 없는 갱신.
+
+정확한 산술에서는 같은 필터입니다. 수치 안정화를 위해 통계 모형을 바꾸지 않으므로, 원인 분리에도 적합합니다.
+
+검증은 NaN 유무만으로 판단하면 안 됩니다.
+
+- 같은 매개변수·자료에서 FP64 기준과 예측·이득·NLL 비교.
+- 최초 오류가 정방향·기울기·Adam·새 매개변수 중 어디인지 확인.
+- 저장된 P의 부호와 FP32 이차형식·고유값 평가 오차 구분.
+- 역전파 기울기 일치도와 시간·메모리 측정.
+- 기존 판정 유지.
+
+저랭크 Joseph에서도 허용 오차를 넘는 손상이 지속된다면, **재배열만으로 단일 FP32 조밀 P의 한계를 해결할 수 없다는 판단**이 필요합니다. 그때는 인수 표현·충분한 정밀도 또는 명시적인 근사를 선택해야 합니다. 현재 조사로 빠르고 보장된 해법을 약속할 수는 없습니다.
+
+마지막으로 동시 학습판의 원리 해석에는 별도 제한이 있습니다.
+
+\[
+\epsilon_{\rm write}=y-F_0-m,\qquad
+\epsilon_{\rm loss}=y-F_0-m-G.
+\]
+
+쓰기는 첫 오차로 하고, R·q 학습은 두 번째 오차를 봅니다. G에 따른 출력 불확실성 변화도 S에 반영하지 않습니다. 따라서 전체 동시판은 동일 선형 가우시안 모형의 정확한 주변우도·사후분포가 아닙니다. 이것은 수치 해법과 분리해 검토해야 하며, 이번 NaN의 직접 원인으로 입증된 것은 아닙니다. [코드](/workspace/RL-TDP/scripts/world/diag_20261117/synapse_wm_joint.py:83)
+
+문헌의 관련 수식·절과 공식 구현을 확인했습니다. 조건수 근사·미분식·대각 근사의 손실 설명은 직접 유도한 것입니다. 후보들의 이 레포에서의 안정성·속도는 새로 측정하지 않았으며, 기억에만 의존한 문헌 주장을 근거로 사용하지 않았습니다.

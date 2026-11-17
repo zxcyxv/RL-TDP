@@ -23,6 +23,7 @@ A_MOVES = np.array([[0, 1], [0, -1], [1, 0], [-1, 0]])       # 동 서 남 북
 INTERACT, WAIT, NA = 4, 5, 6
 FLOOR0, SITE, DEPOT, ITEM0, CARD_BACK, BLANK, STAMP = 1, 13, 15, 16, 20, 21, 22
 PUBLIC = False                                                  # True: 공개 의뢰 (카드 앞면)
+EXTRA_REVISIT = False                                           # True: 교사 끝에 바뀌지 않은 채집처 재방문 하나 추가 (학습 자료 실험용, 판정 세계에는 쓰지 않음)
 TEX = E.textures(E.EnvCfg(N=N, V=3, n_types=24))
 
 
@@ -104,6 +105,9 @@ def teacher(rng, depot, sites, roles, D):
     for i in range(D):                                         # 보존: 보급소 주변 맴돌기 (보급소는 벽에서 2칸 이상 안쪽이라 막히지 않음)
         acts.append([0, 1, 2, 3][i % 4] if i % 8 < 4 else WAIT); req.append(cur[0]); rid.append(cur[1])
     errand(roles["b0"])                                        # 변경 증거: b0 → C, 보상 0 (같은 B 의뢰라 도장 없음)
+    if EXTRA_REVISIT:                                          # 학습 자료 전용 (Codex ②): 보존 뒤, 바뀌지 않은 채집처 하나를 다시 방문
+        s = rng.choice([i for i in range(NSITE) if i != roles["b0"]])
+        errand(int(s))
     return np.array(acts), np.array(req), np.array(rid), change_t
 
 

@@ -35,7 +35,9 @@ def textures(cfg: EnvCfg, seed=0):
     k1, k2 = jax.random.split(jax.random.PRNGKey(seed))
     base = jax.random.uniform(k1, (cfg.n_types + 1, 1, 1, 3))
     tex = 0.6 * base + 0.4 * jax.random.uniform(k2, (cfg.n_types + 1, cfg.P, cfg.P, 3))
-    return tex.at[0].set(0.05)
+    tex = tex.at[0].set(0.05)
+    # 8비트 양자화 (2026-11-17부터 기본): 실제 영상 (Craftax·Minecraft)처럼 픽셀값을 k/255로. 이전 결과는 양자화 없는 float32 무늬였다.
+    return jnp.round(tex * 255.0) / 255.0
 
 
 def reset(key, cfg: EnvCfg):

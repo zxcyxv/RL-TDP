@@ -1,0 +1,4 @@
+lengths: train (1024, 518) val (128, 512)
+[loaded] b1 0.5898 b0 0.4102 other 0.0000  slot q 2.14e-06 sigma2 0.000719
+[slot_q_1213] b1 0.4688 b0 0.5312 other 0.0000  slot q 1.81e-05 sigma2 0.000719
+[slot_q_sigma2_1213] b1 0.5352 b0 0.4531 other 0.0117  slot q 1.81e-05 sigma2 0.00387

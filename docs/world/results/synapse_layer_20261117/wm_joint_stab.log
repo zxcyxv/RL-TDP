@@ -1,0 +1,19 @@
+R0 1.3409488310832847e-06
+lengths: train (1024, 518) val (128, 512)
+[start = 무작위 월드 모델 + 12.13 칼만 값 + 무작위 키] val_nll -203816.6  syn: b1 0.3789 b0 0.5898 other 0.0312  wm: b1 0.3789 b0 0.5898 other 0.0312  wm_memoff: b1 0.1875 b0 0.1914 other 0.6211  (24s)
+  [time] it 1 loss -206560.7 (40.2s)
+  [time] it 2 loss -197379.2 (40.3s)
+  [time] it 3 loss -203385.2 (40.4s)
+  [time] it 10 loss -214321.7 (41.3s)
+it 100 train -249010.5 val -244922.7 best -244922.7@100 half_life 7.61 (53s)
+it 200 train -265771.8 val -262245.1 best -262245.1@200 half_life 7.40 (66s)
+it 300 train -272287.0 val -268601.3 best -268601.3@300 half_life 7.77 (80s)
+it 400 train -277227.4 val -272410.4 best -272410.4@400 half_life 8.02 (93s)
+it 500 train -277318.3 val -274318.2 best -274318.2@500 half_life 8.26 (106s)
+  [judge it 500] syn: b1 0.4961 b0 0.4023 other 0.1016  wm: b1 0.5391 b0 0.3750 other 0.0859  wm_memoff: b1 0.2070 b0 0.1797 other 0.6133
+it 600 train -277724.5 val -274988.8 best -274988.8@600 half_life 8.46 (120s)
+it 700 train -279149.6 val -275506.0 best -275506.0@700 half_life 8.77 (133s)
+it 800 train -278616.1 val -275490.9 best -275506.0@700 half_life 9.07 (146s)
+it 900 train -280471.6 val -276795.3 best -276795.3@900 half_life 9.34 (159s)
+nan at 915
+[after] val_nll -276795.3@900  syn: b1 0.2188 b0 0.3594 other 0.4219  wm: b1 0.2188 b0 0.3164 other 0.4648  wm_memoff: b1 0.1836 b0 0.1758 other 0.6406

@@ -1,0 +1,10 @@
+R0 (observation noise floor) 0.0
+lengths: train (1024, 518) val (128, 512)
+[start = 12.13 (무작위 키 + 12.13 경험적 베이즈 σ²·R·q)] val_nll -197131.2  b1 0.8516 b0 0.1484 other 0.0000  (40s)
+  [time] it 1 loss -199818.6 (71.2s)
+  [time] it 2 loss -201236.6 (73.1s)
+  [time] it 3 loss -201964.7 (74.9s)
+  [time] it 4 loss -201876.8 (76.9s)
+  [time] it 5 loss -201173.5 (78.8s)
+  [time] it 10 loss -202052.4 (88.2s)
+it 100 train -208146.6 val -204472.9 best -204472.9@100 half_life 7.44 (261s)

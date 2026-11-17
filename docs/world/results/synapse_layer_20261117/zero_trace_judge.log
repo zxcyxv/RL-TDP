@@ -1,0 +1,6 @@
+R0 (observation noise floor) 1.3409488310832847e-06
+lengths: train (1024, 518) val (128, 512)
+[start|carried_trace] b1 0.8477 b0 0.1523 other 0.0000 read_norm 0.1945
+[start|zero_trace] b1 0.8164 b0 0.1836 other 0.0000 read_norm 0.1879
+[cellkey_r0_10k_params.npz|carried_trace] b1 0.7109 b0 0.2891 other 0.0000 read_norm 0.1270
+[cellkey_r0_10k_params.npz|zero_trace] b1 0.7188 b0 0.2812 other 0.0000 read_norm 0.1282

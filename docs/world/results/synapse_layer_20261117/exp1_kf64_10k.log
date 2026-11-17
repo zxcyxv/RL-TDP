@@ -1,0 +1,19 @@
+R0 (observation noise floor) 0.0
+lengths: train (1024, 518) val (128, 512)
+[start = 12.13 (무작위 키 + 12.13 경험적 베이즈 σ²·R·q)] val_nll -197087.6  b1 0.8477 b0 0.1523 other 0.0000  (29s)
+it 100 train -206846.7 val -204455.5 best -204455.5@100 half_life 7.45 (122s)
+it 200 train -229761.1 val -226440.2 best -226440.2@200 half_life 8.29 (203s)
+it 300 train -238168.6 val -237948.5 best -237948.5@300 half_life 9.26 (284s)
+it 400 train -248656.5 val -243457.5 best -243457.5@400 half_life 9.95 (365s)
+it 500 train -252101.0 val -247392.9 best -247392.9@500 half_life 10.39 (446s)
+  [judge it 500] b1 0.5312 b0 0.4688 other 0.0000
+it 600 train -249615.8 val -250379.0 best -250379.0@600 half_life 10.62 (529s)
+it 700 train -259147.0 val -253329.2 best -253329.2@700 half_life 10.61 (610s)
+it 800 train -263074.6 val -255848.9 best -255848.9@800 half_life 10.51 (691s)
+it 900 train -260516.6 val -257663.3 best -257663.3@900 half_life 10.29 (771s)
+it 1000 train -266286.4 val -259959.7 best -259959.7@1000 half_life 10.06 (852s)
+  [judge it 1000] b1 0.5469 b0 0.4531 other 0.0000
+it 1100 train -268054.5 val -261619.6 best -261619.6@1100 half_life 9.75 (936s)
+it 1200 train -268175.5 val -264044.5 best -264044.5@1200 half_life 9.47 (1017s)
+it 1300 train -271247.0 val -265456.9 best -265456.9@1300 half_life 9.19 (1097s)
+it 1400 train -271850.8 val -267531.3 best -267531.3@1400 half_life 8.87 (1178s)

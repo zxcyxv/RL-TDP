@@ -1,0 +1,2557 @@
+OpenAI Codex v0.169.0
+--------
+workdir: /workspace/RL-TDP
+model: gpt-6.1-sol
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: ultra
+reasoning summaries: none
+session id: 01a1e87d-aa44-7dc2-9562-cffea1f580fa
+--------
+user
+# Codex 연구 요청: 근본적으로 더 나은 아키텍처 (2026-11-17)
+
+## 요청
+
+이 레포 (`/workspace/RL-TDP`, 브랜치 `claude/busy-goldberg-392gtg`)의 목표에 대해, **근본적으로 더 나은 아키텍처가 되려면 무엇이 어떻게 바뀌어야 하는지** 연구해 달라. 기존 구조를 부분적으로 고치는 처방이든, 다른 구조든 좋다. 결론은 당신이 레포와 문헌을 직접 검토해서 내린다.
+
+**기존 레포의 맥락을 존중한다.** 지금까지의 목표, 원리, 사용자 결정, 실험 기록에는 이유가 있다. 그것을 바꾸자고 할 때는 무엇을, 왜 바꾸는지 기록과 근거를 들어 밝힌다. 기록과 해석이 다르면 결과 파일과 실행 코드를 우선한다.
+
+## 먼저 읽을 것
+
+- `README.md`, `docs/README.md`
+- `docs/ROADMAP.md` (목표, 요구별 모듈과 단계)
+- `docs/HANDOVER.md` (현재 상태, 사용자 결정, 규칙. 특히 0절)
+- `docs/progress.md` (날짜순 기록)
+- `docs/world/README.md` (세계 과제 6–12절, errand 12절)
+- `docs/world/synapse_layer_spec_basic.md`, `docs/world/synapse_layer_spec_mult.md` (2026-11-17 명세)
+- 이전 제안과 진단: `docs/world/architecture_proposal.md`, `docs/world/architecture_diagnosis.md`, `docs/world/sf_architecture.md`, `docs/consolidation/README.md`
+- 코드: `rltdp/world/errand*.py`, `scripts/world/diag_20261115/eb_scale.py`, `scripts/world/diag_20261117/`
+
+## 2026-11-17 실행 기록 (아직 문서에 정리되지 않음)
+
+모두 시드 1, 판정 세계 256개 (1000–1255), 학습 세계 1024개 (50,000–51,023), 검증 128개, 같은 손 선호 판정. 출발점은 12.13 구성 (고정 난수 키, 12.13에서 경험적 베이즈로 맞춘 칸별 σ², R, q). 이 기기에서 그 출발점의 판정은 b1 84.8–85.2%. 코드와 결과는 `scripts/world/diag_20261117/`, `docs/world/results/synapse_layer_20261117/`.
+
+| 실행 | 바꾼 것 (12.13 대비) | 결과 파일 | 판정 b1 / b0 / 다른 곳 |
+|---|---|---|---|
+| 명세 1 | 키 경로 학습 (공유 키), 2000반복 | `spec1.*` | 60.5 / 39.5 / 0 |
+| 칸 토큰판 | 칸마다 키 + 시냅스 하나를 12칸이 공유, 키 무작위 초기화, 2000반복 | `token.*` | 21.5 / 23.8 / 54.7 |
+| 칸별 키판 | 칸마다 키, 시냅스는 칸마다 따로, 2000반복 | `cellkey.*` | 58.6 / 41.4 / 0 |
+| 칸별 키판 1만 반복 | 같음, 3160반복에서 NaN (시야 칸 R 약 2e-13) | `cellkey_10k.*` | 3100반복 74.6 / 25.4 / 0 |
+| 칸별 키판 + 관측 잡음 바닥 R₀ ≈ 1.3e-6, 1만 반복 | 예측 분산 S = R₀ + R_p + zᵀPz | `cellkey_r0_10k.*` | 9700반복 69.9 / 30.1 / 0 |
+
+부가 측정 (같은 폴더):
+- `cellkey_params_qdiag.json`: 칸별 키판 2000반복 체크포인트에서 도착 칸 q만 12.13 값으로 바꾸면 b1 46.9%, q와 σ²를 모두 바꾸면 53.5%.
+- `decomp_r0.json`: probe 읽기를 과거 쓰기 스텝별 가중치로 정확히 분해 (ŷ = Σ_t w_t r_t). 12.13 시작 상태와 R₀ 판 9700반복을 비교.
+- `zero_trace_judge.json`: probe를 흔적 0에서 시작한 판정. 12.13 81.6%, R₀ 판 71.9%.
+- 판정은 500반복마다 로그에 있다 (`*.log`).
+
+위 표는 측정값이다. 해석은 당신이 직접 한다.
+
+## 바라는 결과
+
+1. 목표와 요구 (HANDOVER 0절, ROADMAP)에 비추어, 지금 아키텍처의 근본 한계가 무엇인지. 근거는 기록, 코드, 수식, 문헌.
+2. 근본적으로 더 나은 아키텍처의 제안. 구성 요소, 식, 느린 학습과 세션 안 빠른 갱신의 분업, 학습 목적.
+3. 레포의 기존 원리와 결정 가운데 유지하는 것, 바꾸는 것, 그 이유.
+4. 이 제안이 맞는지 가를 수 있는 시험. 무엇을 바꾸고 무엇을 고정하는지, 사전 예측과 반증 기준.
+5. 확실하지 않은 것과 가정한 것의 구분. 문헌은 확인한 것과 기억에 의존한 것을 구분해 적는다.
+
+## 중간 답변
+
+위 1–5의 대목을 하나 마칠 때마다, 그 대목의 중간 답변을 바로 메시지로 내보낸다. 마지막에 한꺼번에 내지 않는다. 마지막 메시지에는 1–5를 합친 최종 답변을 낸다.
+
+## 규칙 (사용자)
+
+- 이론과 설계만 한다. 코드 구현, 학습, 실험 실행은 하지 않는다 (구현과 실험은 Claude가 맡는다). 코드와 결과 파일은 읽어도 된다.
+- 레포 파일을 수정하지 않는다. 결과는 답변으로만 낸다.
+- 손으로 만든 장치 금지, 시험 (판정)은 바꾸지 않음, 실험에서는 한 번에 하나만 바꿈 (HANDOVER 0절 규칙).
+- 한국어로 답한다.
+
+codex
+지정한 문서, 실행 코드, 결과 파일을 읽고 문헌과 대조하겠습니다. 파일 수정이나 실험 실행은 하지 않겠습니다. 1–5를 차례로 마칠 때마다 중간 답변을 보내고, 마지막에 통합하겠습니다.
+
+exec
+/bin/bash -lc "pwd && git status --short && git branch --show-current && rg --files -g 'AGENTS.md' -g '*.md' docs scripts/world/diag_20261117 rltdp/world | head -160" in /workspace/RL-TDP
+ succeeded in 0ms:
+/workspace/RL-TDP
+ M docs/world/synapse_layer_spec_basic.md
+?? docs/world/codex_prompt_architecture_research.md
+?? docs/world/results/synapse_layer_20261117/
+?? scripts/world/diag_20261117/
+claude/busy-goldberg-392gtg
+docs/consolidation/toy_predictions.md
+docs/ROADMAP.md
+docs/README.md
+docs/HANDOVER.md
+docs/consolidation/README.md
+docs/memory/r1_results.md
+docs/memory/r1_predictions.md
+docs/icrl/icrl_memory_gate.md
+docs/world/codex_prompt_architecture_research.md
+docs/world/tdp_scale_stability.md
+docs/world/synapse_layer_spec_mult.md
+docs/world/synapse_layer_spec_basic.md
+docs/world/state_inference_design.md
+docs/world/sigma_x_predictions.md
+docs/world/sf_architecture.md
+docs/fep/memory_energy_theory.md
+docs/fep/handover/review-notes.md
+docs/btsp/tdp_plasticity_rl.md
+docs/btsp/results.md
+docs/btsp/m1_tdp_btsp_design.md
+docs/fep/exp2d_design.md
+docs/fep/exp2c_results.md
+docs/fep/exp2c_predictions.md
+docs/fep/aif_integration.md
+docs/fep/agent_design_v2.md
+docs/fep/agent_design_draft.md
+docs/fep/README.md
+docs/fep/exp2f_design.md
+docs/fep/exp2e_results.md
+docs/fep/exp2e_predictions.md
+docs/fep/handover/README.md
+docs/world/codex_prompt_architecture_proposal_integrated.md
+docs/world/codex_prompt_architecture_proposal.md
+docs/world/codex_prompt_architecture_followup.md
+docs/world/codex_prompt_architecture_diagnosis.md
+docs/world/codex_prompt_architecture.md
+docs/world/architecture_proposal.md
+docs/world/architecture_diagnosis.md
+docs/world/architecture_design.md
+docs/world/aba_predictions.md
+docs/world/README.md
+docs/progress.md
+docs/world/codex_prompt_state_inference.md
+docs/world/codex_prompt_plasticity.md
+docs/world/codex_prompt_model_design.md
+docs/world/codex_prompt_integrated_experiment.md
+docs/world/codex_prompt_insession.md
+docs/world/codex_prompt_architecture_proposal_simple.md
+docs/world/integrated_experiment_design.md
+docs/world/insession_design.md
+docs/world/codex_prompt_state_inference_redirect.md
+docs/world/model_design.md
+docs/world/plasticity_design.md
+docs/fep/handover/01-theory.md
+docs/fep/handover/02-spec.md
+docs/world/results/synapse_layer_20261117/codex_architecture_research_answer.md
+
+exec
+/bin/bash -lc 'cat README.md docs/README.md docs/ROADMAP.md' in /workspace/RL-TDP
+ succeeded in 0ms:
+# RL-TDP
+
+마인크래프트에서 실시간으로 적응하는 에이전트를 목표로 한다. 기억이 새롭고, 믿을 만하고, 관련 있는 입력만 쓰고, 증거가 있을 때만 버리고,
+필요한 것만 읽어서 같은 크기로 훨씬 먼 과거까지 쓸모 있게 만드는 것이 핵심이다. 틀은 자유에너지원리와 능동적 추론, 비교군은 DreamerV3.
+
+- 목표와 단계: [`docs/ROADMAP.md`](docs/ROADMAP.md)
+- 현재 상태와 할 일: [`docs/HANDOVER.md`](docs/HANDOVER.md)
+- 문서 색인: [`docs/README.md`](docs/README.md)
+
+| 코드 | 내용 |
+|---|---|
+| `rltdp/common/` | 공통 모듈 (MiniGrid 래퍼, 격자 유틸, TDP 블록, 재현 버퍼) |
+| `rltdp/fep/` | 월드 모델과 능동적 추론 에이전트 구현 |
+| `rltdp/btsp/` | TDP 흔적 위의 가소성 규칙 에이전트 |
+| `rltdp/icrl/` | 고정 크기 기억의 토이 실험과 사전학습 비교 |
+
+```bash
+pip install -e .
+python -m pytest -q
+```
+# 문서 색인
+
+먼저 읽을 것: [`ROADMAP.md`](ROADMAP.md) (목표, 요구별 모듈과 단계), [`HANDOVER.md`](HANDOVER.md) (현재 상태와 할 일). 날짜순 전체 기록: [`progress.md`](progress.md).
+
+| 주제 | 내용 | 문서 |
+|---|---|---|
+| **fep** | 정확한 우도 월드 모델 (조건부 흐름) 대 RSSM-VAE, 선호분포·기대 자유에너지 에이전트 | [`fep/README.md`](fep/README.md) |
+| **btsp** | TDP 흔적 위의 BTSP 쓰기로 학습하는 에이전트 | [`btsp/results.md`](btsp/results.md), [`btsp/tdp_plasticity_rl.md`](btsp/tdp_plasticity_rl.md), [`btsp/m1_tdp_btsp_design.md`](btsp/m1_tdp_btsp_design.md) |
+| **world** | **현재 작업 (R3)**: forage 격자, synapse / gru / tdp 에이전트 | [`world/README.md`](world/README.md), [`world/tdp_scale_stability.md`](world/tdp_scale_stability.md) |
+| **memory** | R1: 흐름형 연상 회상과 쓰기 규칙 | [`memory/r1_results.md`](memory/r1_results.md) |
+| **icrl** | 고정 크기 기억: 충분통계, 망각, 플래토 게이트, 사전학습 비교 (R1·R2 설계의 근거) | [`icrl/icrl_memory_gate.md`](icrl/icrl_memory_gate.md) |
+| **consolidation** | 해마–신피질 공고화 문헌 (수학 모형, 강화학습 적용, 잔차 방향)과 칼만 시냅스 대응, 공고화 토이 | [`consolidation/README.md`](consolidation/README.md) |
+# 로드맵: 실시간으로 적응하는 에이전트 (마인크래프트)
+
+## 0. 목표
+
+구체적인 목표: 마인크래프트에서 실시간으로 적응하는 에이전트.
+
+**실질 목표: DreamerV3의 마인크래프트 다이아몬드 설정에서 같은 조건으로 비교한다.**
+- 환경: MineRL, 관측 64×64 이미지 + 인벤토리·장착·체력, 범주형 행동 25개 (제작·배치·장착·제련은 행동 하나), 블록 부수는 속도 100배.
+- 보상: 원목 → 판자 → 막대 → 제작대 → 나무 곡괭이 → 조약돌 → 돌 곡괭이 → 철광석 → 화로 → 철괴 → 철 곡괭이 → 다이아몬드, 12단계를 에피소드에서 처음 얻을 때마다 +1, 체력 변화 × 0.01.
+- 에피소드: 죽거나 36,000스텝 (30분)이면 초기화. 예산 1억 스텝.
+- 주장할 형태: 같은 설정과 예산에서 기억 모듈을 넣은 에이전트가
+  (a) 같은 환경 스텝에서 단계 달성률·다이아몬드 비율이 더 높거나,
+  (b) 에피소드 안의 적응이 빠르다 (한 번 본 자원으로 돌아가기, 세계마다 다른 배치에 맞추기).
+- 범위: 한 세션 (최대 36,000스텝) 안의 기억.
+
+추상화한 목표:
+> 끝없이 이어지고 계속 변하는 흐름 위에서, 고정된 기억 용량과 스텝당 고정된 계산만으로, 지금 저장한 것이 미래에 쓸모 있는 정도를 최대로 만든다.
+> 적응 = 순전파 안의 기억 갱신 (추론 중 경사 갱신 없음).
+
+이를 위해 기억이 내리는 결정은 셋이다.
+
+| 결정 | 질문 | 기준 |
+|---|---|---|
+| 쓰기 | 이 입력을 넣을 가치가 있나 | 새로움 × 신뢰도 × 관련성 |
+| 유지·망각 | 이미 쓴 것을 계속 둘 가치가 있나 | 지금도 미래를 설명하는가 (시간이 아니라 증거로) |
+| 읽기 | 지금 무엇을 꺼낼까 | 현재 상황이 요구하는 것만 |
+
+중요한 것만 쓰면 읽기 간섭이 저장한 중요 사건의 수에만 비례하므로, 같은 크기의 기억이 스텝이 아니라 사건 단위로 한계가 정해진다.
+
+공통 지표 (모든 단계):
+- **회상 거리**: 같은 기억 크기에서 얼마나 먼 과거의 중요한 정보까지 정확히 꺼내는가.
+- **방해 불변성**: 중요하지 않은 입력의 비율을 늘려도 회상 거리가 줄지 않는다. 중요한 비율이 ρ라면 회상 거리는 약 1/ρ배.
+- **길이 불변성**: 흐름을 학습 길이의 수십 배로 늘려도 위 곡선이 변하지 않는다. 학습 길이보다 먼 과거를 회상해야 하는 조건에서 잰다 (기억이 짧은 모델은 이 성질을 공짜로 얻는다).
+
+## 1. 진행 방식
+
+```
+요구 k → 그 요구만 만족하는 가장 단순한 형태 → 그 요구를 겨냥한 실험으로 입증
+       → 요구 k+1을 더한 형태 → 입증 → 앞 단계에서 필요한 것만 남겨 더 단순한 구조로 다시 짠다 → 반복
+```
+
+분별 원칙:
+1. **필요성으로만 들어온다.** 모듈은 그 요구를 겨냥한 실험에서 빼면 나빠질 때만 남긴다. 나중의 더 단순한 구조가 같은 일을 하면 대체한다.
+2. **원리로 정한 형태가 먼저다.** 자유 파라미터는 실험 전에 고정한다. 학습되는 부분은 원리로 정한 형태가 못 하는 것이 보였을 때만 넣는다.
+3. **알려진 것과 주장할 것을 구분한다.** 알려진 결과는 빠르게 확인하거나 인용한다. 주장에는 사전 예측 (실행 전에 적어 둠), 시드 여러 개, 가장 강한 비교군을 붙인다.
+4. **비교군은 둘 다 둔다.** 가장 단순한 것 (모든 입력을 쓰는 기억)과 가장 강한 것 (학습 게이트, 정답 게이트 상한).
+5. **땜질 금지.** 실패하면 문턱·손실·머리를 덧붙이지 않고, 어떤 요구를 잘못 형식화했는지로 돌아간다.
+
+## 2. 틀: 자유에너지원리와 능동적 추론
+
+기억 = 생성 모델의 빠른 파라미터. 쓰기 = 그 파라미터에 대한 믿음 갱신, 읽기 = 추론, 행동 = 기대 자유에너지 최소화.
+
+| 요구 | 자유에너지원리의 대응 |
+|---|---|
+| 신뢰도 (잡음은 쓰지 않음) | 감각 정밀도: 예측 오차를 정밀도로 가중 |
+| 새로움 (아는 것은 쓰지 않음) | 기억 내용의 사후 불확실성: 확실한 방향일수록 갱신이 작다 |
+| 관련성 (중요한 것만 씀) | 기대 자유에너지: 선호 (실용 가치)와 정보 이득 (인식론적 가치) |
+| 변화 (낡은 것은 버림) | 변동성 (과정 잡음): 예측 오차가 예상 잡음보다 계속 크면 불확실성을 키움 |
+| 선택적 읽기 | 숨은 원인 (맥락)에 대한 추론, 주의 = 정밀도 |
+
+신뢰도·새로움·변화는 "기억 행렬에 대한 칼만 필터" 하나로 묶인다:
+M ← M + (v − Mk)(Pk)ᵀ / (kᵀPk + σ²), P ← P − (Pk)(Pk)ᵀ / (kᵀPk + σ²) + Q.
+σ² = 관측 잡음 (신뢰도), P = 기억 불확실성 (새로움), Q = 변동성 (변화).
+- P를 스칼라 상수로 두면 학습률 β = P/(P + σ²)인 델타 규칙이다.
+- 여기에 기억의 평균 회귀 (감쇠 α)를 더하면 Gated DeltaNet과 같은 꼴이다. 차이는 β_t, α_t가 입력에서 학습되는 대신 정밀도·불확실성·변동성으로 정해진다는 점이다.
+
+기존 선형 순환 기억들이 이 식의 특수한 경우이고, 빠진 항 (키 방향별 P, 추정된 σ², 증거로 정한 Q)이 R1·R2의 요구를 채운다는 것이 출발 가설이다.
+연관 기억의 칼만 / RLS 해석이 선행 연구에 이미 있는지는 R1 구현 전에 확인한다.
+
+## 3. 엔지니어링 참고
+
+- **DreamerV3**: RSSM 월드 모델 + 상상 속 actor-critic, symlog 예측, two-hot 보상·가치 머리, KL 균형과 free bits, 백분위 수익 정규화, 도메인 간 고정 하이퍼파라미터. R4~R5의 뼈대이자 비교군.
+- **실시간 학습 계열**:
+  - 스트리밍 강화학습 (Elsayed et al. 2024: 재현·목표망 없는 온라인 TD(λ), 안정화 기법)
+  - 시험 시간 학습 (TTT, Titans: 놀라움으로 쓰고 모멘텀·감쇠로 망각)
+  - 선형 순환 기억 (DeltaNet, Gated DeltaNet, Mamba 계열)과 기억 용량 벤치마크 (MQAR, Zoology: Arora et al. 2023)
+  - 강화학습용 순환 기억 (AGaLiTe, POPGym Arcade), 월드 모델의 상태공간 기억 (R2I, Drama)
+  - 연속 학습의 소성 손실 (Dohare et al. 2024)
+
+## 4. 단계
+
+비교군 (R4, R5): **DreamerV3**. 공식 코드 (`danijar/dreamerv3`, JAX) 그대로를 기준으로 두고, 기억 모듈은 같은 코드의 RSSM 결정론 경로에 끼워 넣어
+나머지 (인코더, 머리, actor-critic, 하이퍼파라미터)를 같게 둔다. 기억 구조끼리의 비교 (R2I, Drama)는 필요해질 때 추가한다.
+
+| 단계 | 요구 | 최소 형태 | 입증 | 다음으로 넘길 것 |
+|---|---|---|---|---|
+| R1 | 쓰기: 새로움 × 신뢰도 × 관련성 | 키·값 외적 기억 + 칼만 쓰기 (σ² 추정, 키 방향별 P) + 관련성 흔적 (결과 신호 × 키 흔적, 감쇠 = 할인) | 아래 R1 과제 | 쓰기 규칙 |
+| R2 | 유지·망각: 낡은 것만 버린다 (초기화 없이, 증거로) | 변동성 Q를 키 방향별로, 정밀도 가중 증거 (로그 우도비 > 사전 승산비)로 키운다 | R1 과제에 "일부 연합만 단서 없이 값이 바뀜"을 더한 흐름: 바뀐 것은 정답 초기화 상한에 가깝게 고치고 안 바뀐 것은 보존 | 키 단위 변동성 |
+| R3 | 선택적 읽기 | 질의로 맥락을 추론해 해당 기억만 읽기 (선형 읽기 대 날카롭게 한 읽기) | 저장 항목이 많을 때의 읽기 간섭 | 읽기 규칙 |
+| R4 | 기억이 예측에 쓰인다 | R1~R3 기억을 DreamerV3 월드 모델의 결정론 경로에. 관측 예측 오차가 쓰기 신호, 보상·가치 예측이 관련성 신호 | Crafter / Craftax-classic (100만 스텝, DreamerV3 대비): 성취도, 예측 정확도, 방해 (날씨·입자·무관한 몹)에 대한 불변성 | 월드 모델 |
+| R5 | 마인크래프트 다이아몬드 | R4 에이전트를 DreamerV3 설정 그대로. 행동은 먼저 DreamerV3의 actor-critic, 다음으로 기대 자유에너지 | 0절의 주장 (a), (b) | 에이전트 |
+
+### R1 과제: 방해가 섞인 흐름형 연상 회상
+
+연관 기억 용량의 표준 과제 MQAR를 에피소드 구분 없는 흐름으로 만든 것. 하나의 과제에서 방해 종류의 손잡이로 세 인자를 따로 시험한다.
+
+흐름:
+- 매 스텝 (키, 값) 항목 하나가 관측 벡터로 들어오거나, 질의 (과거에 본 키)가 들어온다. 질의의 정답은 그 키의 값이다.
+- 질의 지연은 짧은 것부터 학습 길이의 수십 배까지 고르게 (로그 균등) 둔다.
+- 기억 크기 (상태 크기)는 모든 모델에 같게, 흐름 속 항목 수보다 훨씬 작게 둔다.
+
+| 항목 종류 | 성질 | 시험하는 인자 |
+|---|---|---|
+| 중요 | 값이 일정하고 나중에 질의됨 | 회상 대상 |
+| 잡음 | 같은 키가 올 때마다 값이 무작위 | 신뢰도 |
+| 반복 | 이미 아는 연합이 그대로 다시 옴 | 새로움 |
+| 무관한 새것 | 값은 일정하지만 질의되지 않음 | 관련성 |
+
+- 키는 종류 (클래스)에서 뽑는다. 종류마다 고유한 잡음 수준과 중요도가 있어서, 한 번만 본 항목의 정밀도·관련성은 종류에 대한 사전 지식 (느린 가중치가 학습)으로 판단해야 한다.
+- 관련성의 출처는 둘이다: 종류 사전 지식 (어떤 종류는 원래 중요하다)과 결과 (중요 항목 몇 스텝 뒤에 보상 토큰이 온다, 키 흔적 필요).
+- 결정적 지점: 잡음 항목은 올 때마다 오차가 커서 델타 규칙에게는 가장 새로워 보인다. 새로움과 잡음을 가르는 것이 정밀도이고, 그 출처는 같은 키의 반복 관측 (항목 단위)과 종류 사전 정밀도 (느린 가중치)다.
+
+진행: **R1-a** (관련성 방해 0: 잡음·반복만, 새로움과 신뢰도) → **R1-b** (무관한 새것을 더함, 관련성).
+
+비교군:
+- Hebb 덧셈 누적 (선형 어텐션): 모든 입력을 쓴다.
+- 델타 규칙 (DeltaNet): 새로움만.
+- Gated DeltaNet: 학습된 게이트, 짧은 조각으로 학습.
+- 정답 게이트: 중요 항목만 정확히 쓰는 상한.
+
+사전 예측 (실행 전에 별도 문서로 고정한다):
+
+| 방해 | 무너지는 비교군 | 우리 쓰기 규칙 |
+|---|---|---|
+| 잡음 | 델타 규칙 | 회상 거리 유지 |
+| 반복 | Hebb | 회상 거리 유지 |
+| 무관한 새것 | 신뢰도·새로움만 보는 쓰기 | 회상 거리 ∝ 1/ρ, 정답 게이트에 근접 |
+| 학습 길이 밖 지연 | Gated DeltaNet (회상 거리 감소) | 불변 |
+
+제거 실험: 정밀도·새로움·관련성을 하나씩 빼서 위 표의 무너짐이 재현되는지 본다.
+지표: 지연별 회상 정확도, 회상 거리 (정확도가 기준 아래로 떨어지는 지연)를 ρ·방해 구성·기억 크기·흐름 길이에 대해.
+
+## 5. 설계 근거 (기존 실험, `docs/icrl/icrl_memory_gate.md`)
+
+- 고정 크기 외적 기억이 흐름의 충분통계를 손실 없이 누적한다 (토이 1).
+- 사건 뒤로 감쇠하는 흔적이 관련성을 실어 나르고, 그 감쇠는 할인과 같아야 한다. 생 게이트는 기억을 특이·불안정하게 만든다 (토이 3).
+- 망각은 정밀도 가중 증거와 사전 승산비로 터뜨리고, 읽기가 아니라 기억 자체를 바꿔야 한다 (토이 4, 사전학습 비교 B).
+- 전역 덮어쓰기는 변화의 약 40%를 놓치고, 일부만 바뀌는 흐름에서는 바뀌지 않은 기억까지 잃는다. 그래서 망각은 키 단위로 둔다 (R2).
+- 상태 변수는 모두 시간상수가 유한해야 길이 불변이다 (B의 전환별 평가).
+- 학습된 게이트는 이 규모에서 놀라움에 반응하지 않고 고정 시간척도 (약 70스텝)에 머물렀다 (B의 Gated DeltaNet 게이트 측정).
+
+exec
+/bin/bash -lc 'wc -l README.md docs/README.md docs/ROADMAP.md docs/HANDOVER.md docs/progress.md docs/world/README.md docs/world/synapse_layer_spec_basic.md docs/world/synapse_layer_spec_mult.md docs/world/architecture_proposal.md docs/world/architecture_diagnosis.md docs/world/sf_architecture.md docs/consolidation/README.md' in /workspace/RL-TDP
+ succeeded in 0ms:
+    20 README.md
+    12 docs/README.md
+   140 docs/ROADMAP.md
+   222 docs/HANDOVER.md
+   230 docs/progress.md
+   664 docs/world/README.md
+    73 docs/world/synapse_layer_spec_basic.md
+    75 docs/world/synapse_layer_spec_mult.md
+   143 docs/world/architecture_proposal.md
+   169 docs/world/architecture_diagnosis.md
+    79 docs/world/sf_architecture.md
+   215 docs/consolidation/README.md
+  2042 total
+
+exec
+/bin/bash -lc 'cat docs/HANDOVER.md' in /workspace/RL-TDP
+ succeeded in 0ms:
+# 인수인계서
+
+## 0. 한눈에
+
+- **목표**: 마인크래프트에서 실시간으로 적응하는 에이전트. 실질 도달점은 DreamerV3의 마인크래프트 다이아몬드 설정에서 같은 조건으로 DreamerV3를 넘는 것이다.
+- **핵심 가설**: 기억이 새롭고, 믿을 만하고, 관련 있는 입력만 쓰고 (쓰기), 증거가 있을 때만 버리고 (망각), 필요한 것만 읽으면 (읽기), 같은 크기의 기억이 사건 단위로 훨씬 먼 과거까지 쓸모 있게 된다.
+- **틀**: 자유에너지원리와 능동적 추론 (쓰기 = 정밀도 가중 믿음 갱신, 기억 행렬에 대한 칼만 필터). 엔지니어링 뼈대와 비교군은 DreamerV3.
+- **단계**: R1 쓰기 → R2 유지·망각 → R3 읽기 → R4 월드 모델 결합 (Crafter / Craftax) → R5 마인크래프트. 상세는 [`ROADMAP.md`](ROADMAP.md).
+- **지금 할 일 (2026-11-14 갱신)**: R1은 끝났고 (결과: [`memory/r1_results.md`](memory/r1_results.md)), **R2를 건너뛰고 R3를 forage 월드 (`rltdp/world/`)에서 바로 한다** (0.1절).
+  4절의 R1 계획은 기록으로 남긴다. 현재 작업은 [`world/README.md`](world/README.md).
+- **현재 상태 (2026-11-15)**: 작은 과제에서 요구별로 확인 (갈림길 8–9절, 세션 안 신용할당 11절). 통합 시험 축소판 (지연 채집 errand, `world/README.md` 12절)에서, 손 선호 판정 (요구 3 제외)으로 **b1 84%** (12.13): 주소 [지금 키; 흔적], 칸별 칼만 쓰기 (사전 분산 σ², 관측 잡음 R, **과정 잡음 Q**)를 모두 경험적 베이즈 (학습 세계의 주변 우도)로 맞춤, 손 값 없음. Q가 없으면 (RLS) 73%: 바뀐 b0의 B, B, C를 평균 냄. 기각된 것: 임베딩 차원 (12.8), 흔적 극 늘리기 (12.10), 시냅스 읽기 뒤 비선형 블록 (12.12, 선형 읽기가 이미 재방문 80%), 시냅스 읽기를 월드 모델 입력으로 (12.11, 쓰기까지 바꾼 설계 실수로 해석 불가). 세션 안 선호 (요구 3)는 b1 28%로 미해결.
+- **2026-11-16 결과 요약 (상세는 아래 절차 1–3.5, `world/README.md` 12.15–12.17, `world/aba_predictions.md`, `world/sigma_x_predictions.md`)**:
+  - 곱하는 망각 단독 b1 66% (RLS 73%, 더하는 Q 84%). 곱하는 망각은 P에 바닥이 없어 float32에서 제곱근형 (Potter) 구현이 필요.
+  - cr+replay (더하는 Q 위): 합친 기억 85%, 저장소만 69%. **이중 계산 없이 옮겨진다.** 곱하는 망각 위에서는 71% (80%대 미달).
+  - A → B → A (한 세션 안 구역 전환): 시냅스만은 B 구역 8개부터 무너져 32개에서 첫 보상까지 2.60회 (기억 없음 3.0). belief 재생 저장소는 2.24회.
+    **원인은 용량이 아니라 교사 소실**: 같은 저장소에 세션 전체를 한 번에 맞추면 1.32회, 잠의 목표를 날것 관측으로 바꾸면 1.38회. belief 재생의 교사 (시냅스)가 B에 덮여 A의 목표를 잃는다.
+  - σ(x) (기억 몫의 사전 분산을 주소의 함수로, 경험적 베이즈): 쓰기는 희소해지고 증거도 크게 좋아졌지만 b1 30%. 맞춘 기억이 "주소마다 마지막 쓰기가 이김". 사용자 평가: 별로 (보류). 가설 (확인 안 함): 학습 자료에 "오래된 사실이 그대로인 재방문"이 없어 증거 최대화가 최근 것만 믿게 만든다.
+  - 다음 방향은 정하지 않음. 후보: 날것 재생 (값 변화 b0 B → C에서 옛 값을 되살리는지 먼저), TEM식 구조 주소, 절차 4 (후속 특징).
+- **방향 (2026-11-17, 사용자 결정)**:
+  - **별도 저장소는 두지 않는다.** 빠른 것은 시냅스, 오래 가는 것은 느린 가중치. 세션 저장소 (12.16–12.17, A → B → A)는 메커니즘 확인으로만 남긴다 (무작위 특징 위 저장소는 신피질이 아니라 더 큰 두 번째 해마였다).
+  - **시냅스는 망 안의 선형 어텐션식 kv 외적 누적이어야 한다.** 지금의 M은 쓰기 꼴만 그렇고, 키가 고정 난수라 망 바깥의 조회표다. 키·흔적을 망의 표현에서 학습된 사영으로 만든다. GRU 같은 별도 순환 상태는 두지 않는다 (순환 상태 = 시냅스).
+  - 무작위 키는 원리가 아니라 남은 흔적: 학습된 키가 무작위를 못 이긴 12.1–12.5는 모두 쓰기 결함 (12.6–12.13에서 고침) 이전이고, 고친 쓰기 위에서는 재지 않았다. 5절 tdp, 12.11, 12.6의 실패도 모델·조건이 달라 지금 설계에 대한 증거가 아니다. 옮겨지는 것은 인과적 짝짓기, 잔차 값, 칼만 이득 + Q, P와 시간 병렬의 충돌 (수식)뿐.
+  - **다음 시험: 명세 1 → 명세 2.** [`world/synapse_layer_spec_basic.md`](world/synapse_layer_spec_basic.md) (기본형, 더하는 Q, 12.13에서 키 경로만 학습), [`world/synapse_layer_spec_mult.md`](world/synapse_layer_spec_mult.md) (곱하는 망각판, 누적합 꼴). 절차 4 (후속 특징)는 그 뒤. 공고화는 느린 경로로 옮기기 (같은 층의 느린 선형 경로 W_s에 M W_q를 더하고 M에서 덜어 냄, 국소, 역전파 없음)로 나중에 다룬다.
+- **공고화 조사 (2026-11-16)**: 문헌과 토이 [`consolidation/README.md`](consolidation/README.md). 빠른 시냅스를 "현재 느린 모델에 대한 잔차" (cr)로 유지하고 잠에서 믿음을 세션 저장소로 옮기면 (replay), 이중 계산 없이 옮겨지고 시냅스가 빈다. 쓰는 순간의 잔차를 굳히면 폭주한다.
+- **다음 절차 (2026-11-16 결정, 순서대로, 한 번에 하나씩)**:
+  1. **곱하는 망각**: 12.13의 더하는 Q를 곱하는 망각으로 (0.2절). 이유는 사전학습 (모방·오프라인)에서의 시간 축 병렬 학습.
+     **결과 (2026-11-16)**: b1 65.6%, RLS (73.4%)보다도 낮아 대체하지 않음. 12.13 분해 (σ², R 그대로 q = 0): 77.3%, 즉 73 → 84%의 11점 중 σ² 재적합 약 4점, 과정 잡음 약 7점. 맞춘 창: 세계 칸 23–74스텝, 도착 칸 190스텝. 곱하는 망각은 P에 바닥이 없어 float32에서 제곱근형 (Potter) 구현이 필요했다. 상세 [`world/README.md`](world/README.md) 12.15.
+     → 3은 그대로 한다 (사용자, 2026-11-16): 병렬화가 중요하므로, 곱하는 망각이 단독으로 손해여도 cr+replay를 더해 80%대가 나오면 충분히 고려할 만하다.
+  2. **cr+replay**: 12.13 구성 (더하는 Q) 위에 세션 저장소와 잠을 더한다 (0.3절).
+     **결과 (2026-11-16)**: (i) 합친 기억 b1 85.2% (12.13 84.4%, 이중 계산 없음), (ii) 저장소만 68.8% (b0 31%), (iii-b) 시냅스 몫만 81.6%. 도착 칸 시냅스 몫 0.21 → 0.09, 저장소 몫 0.03 → 0.16. 저장소 없는 별도 실행 (iii-a)은 생략 (사용자). 상세 [`world/README.md`](world/README.md) 12.16.
+  3. **곱하는 망각 + cr+replay**: 1과 2를 합친다. 모두 누적합 꼴이 된다 (0.3절).
+     **결과 (2026-11-16)**: (i) 합친 기억 b1 70.7% (시냅스만 64.5%보다 6점 높음), (ii) 저장소만 53.1%, (iii-b) 시냅스 몫만 58.2%. 80%대 기준에 못 미침 (더하는 Q + cr+replay 85.2%). (i)–(ii) 차이가 2단계보다 작다는 예상은 틀림 (17.6 대 16.4점). λ, σ², R은 저장소 없이 맞춘 값 (다시 맞추지 않음). 상세 [`world/README.md`](world/README.md) 12.17.
+  3.5 **A → B → A 복귀 (사용자, 2026-11-16)**: 한 세션 안에서 구역 A → 서로 다른 구역 B m개 → A, 손 선호로 첫 보상까지 시도 수. 설계·예측·결과 [`world/aba_predictions.md`](world/aba_predictions.md).
+     **결과**: 시냅스만은 m = 8부터 무너져 m = 32에서 2.60회 (기억 없음 3.0). 저장소 (12.16 그대로)를 더하면 합친 기억 2.30, 저장소만 2.24. 사전 기준 (0.5회 이상 개선) 미달.
+     옮기기는 됐지만 (시냅스 몫 0.008) 저장소도 B에 덮였다 (m = 0에서 저장소만 1.20 → m = 32에서 2.24). 원인 후보는 저장소 용량 (따로 재지 않음).
+     **진단**: 용량이 아니라 빈 재생. 같은 φ 1024에 세션 전체를 한 번에 맞추면 (ridge) 저장소만 1.32회, 잠의 목표만 날것 관측으로 바꾸면 (raw) 1.38회. belief 재생의 교사는 시냅스인데, B가 시냅스를 넘쳐 A를 덮으면 저장소가 흔들려도 바로잡을 목표가 없다 (cr의 이동 자체는 교사를 비우지 않는다: M_t = M_r − S M_φ가 지금 S 기준이라, 시냅스가 A를 기억하는 한 흔들린 만큼 다시 커진다). 날것 재생의 교사는 세션 전체를 담은 버퍼라 이 한계가 없다 (대신 메모리가 세션 길이에 비례). 남은 질문: 날것 재생이 바뀐 값 (b0 B → C)에서 옛 값을 되살리는가.
+  4. **후속 특징 쪽 설계 고민**: 1–3의 결과를 받아 `world/sf_architecture.md`를 고친다. 구현 전에 사용자 검토 (0.3절).
+- 이전 결정 (2026-11-15, 4에서 다시 정함): 시냅스를 **후속 특징**으로 바꾼다 ([`world/sf_architecture.md`](world/sf_architecture.md)). Ψ = Ψ⁰ + M z를 칼만 시간차 학습 (P, R, Q 경험적 베이즈)으로 쓰고, 선호 u도 세션 안 칼만, 행동은 u·Ψ + 정보 획득. 시험 순서: (1) 쓰기 목표만 γ > 0으로 (같은 판정, 84% 유지 확인), (2) 세션 안 선호 (요구 3), (3) 판정 구간 자율 행동, (4) 관찰도 자율. 그 전에 12.13 구성을 시드 여러 개로 확인.
+  미룬 것: 시냅스 읽기를 월드 모델 입력에 넣기 (쓰기는 그대로, 입력 하나만), 키 학습.
+- **정밀도 정의**: 칼만 필터의 P (기억 내용 불확실성), R (관측 잡음), Q (과정 잡음)와 그로 정해지는 이득만 정밀도라고 부른다. 입력 척도 같은 것을 새로 만들지 않는다 (12.13 끝).
+- **규칙 (사용자)**: 실험 전에 설계 근거와 바뀌는 것을 따지고, 한 번에 하나만 바꾼다. Codex는 이론만, 구현·실험은 Claude. Codex 프롬프트는 사용자 검수 뒤 전송. 시드 1개. 손으로 만든 장치 금지, 시험은 바꾸지 않음. 백그라운드 실행은 띄운 뒤 살아 있는지 확인하고, 동시에 여러 개 띄우지 않음 (호스트 RAM 30GB에서 OOM).
+
+### 0.1 R1 → R3로 바로 넘어간 이유 (사용자 결정, 2026-11-14)
+
+- R1 (MQAR 흐름판)에서 결과는 나왔지만, Craftax에서 돌아가는 형태로 넣으려 하니 MQAR에서 성공한 형태 중 어느 것도 그대로 옮길 수 없었다.
+- 그래서 Craftax와 같은 꼴의 입력 (타일 단위 이미지 패치 + 행동 + 보상, 행동 4개, 에피소드마다 바뀌는 배치)을 쓰는 작은 과제 (forage 월드)에서 R3를 바로 한다.
+- 모델 설계가 여기서 성공하면 R4 (Craftax)에서 달라지는 것은 실질적으로 **난이도와 학습 규모뿐**이다. 이것이 이 순서의 이점이다.
+- 따라서 forage 월드의 설계 판단 기준은 "Craftax로 그대로 옮길 수 있는 형태인가"다.
+
+### 0.2 곱하는 망각을 먼저 하는 이유와 시험 명세 (사용자 결정, 2026-11-16)
+
+**이유: 사전학습에서의 병렬 학습**
+- DreamerV3는 RSSM (GRU)을 64스텝 조각으로 순차 역전파한다. 순차 칼만 쓰기는 DreamerV3 대비 불리하지 않다.
+- 문제는 요즘 흐름이다: 대량 모방·오프라인 사전학습 뒤 실제 환경에서 짧은 파인튜닝 (VPT, Dreamer 4). 기억을 낀 채 긴 궤적을 대량으로 학습하려면 시간 축 병렬이 돼야 한다.
+  이 흐름에서 이 연구의 자리는 "짧은 파인튜닝을 세션 안 가소성으로 대신"이다. 후속 특징의 Ψ는 보상 없이 정의되어 모방 데이터로 사전학습할 수 있고, 세션 안에서는 u만 보상으로 배운다.
+- **병렬이 되는 것**: 쓰기 이득이 주소 z에만 의존하고 M에 선형인 쓰기. 델타, RLS, 망각 계수 RLS, 후속 특징의 TD 쓰기 (부트스트랩이 있어도 M에 선형, LSTD 누적합). 칼만 + 일정 Q는 리카티 재귀가 z에만 의존해 결합 스캔은 되지만 조합마다 d³.
+- **깨지는 것**: 쓰기·망각 세기가 기억 자신의 예측 오차에 의존하는 것. R1 ours (읽기 오차로 키별 잡음 추정), gdn_read, 증거 망각의 χ, 온라인 위험률.
+  선형 가우시안 모델에서 칼만 이득은 관측값과 무관하다. 내용이 끼어드는 것은 변화의 증거 ("내가 기억한 것과 어긋남")와 세션 안에서 추정해야 하는 신뢰도뿐이다. 느린 월드 모델의 놀라움으로는 대신할 수 없다 (b0의 C는 첫 방문의 C와 같은 놀라움).
+- 더하는 Q (P ← P + qI)는 정보형에서 선형 누적합이 아니다. 곱하는 망각은 누적합 두 개 (MesaNet과 같은 꼴)라 청크 병렬이 된다.
+  이것이 84%를 지키면 쓰기와 시간 망각은 사전학습과 양립하고, 남는 병렬화 문제는 증거 망각 하나로 좁혀진다 (후보: 청크 시작 시점의 기억 기준으로 증거를 재는 TTT 층식 지연, 또는 게이트 없는 아래 단계 기억들의 오차로 증거를 만드는 단계형).
+
+**명세**
+- 출발: 12.13 구성 그대로 (`scripts/world/diag_20261115/eb_scale.py`의 `QN=1` 자리). 난수 키, 주소 [k; e], 키 128, 손 선호 판정, 시드 1, 세계 256개.
+- 바꾸는 것: `write()`의 칸별 갱신 하나. 정보형으로
+  - H ← λ_p H + z zᵀ / R_p, G ← λ_p G + r zᵀ / R_p, M = G (H + I)⁻¹. z = σ_p [e; k]는 그대로, 사전 M ~ N(0, I)는 감쇠하지 않는다.
+  - 주변 우도용 예측은 감쇠 뒤·쓰기 전 상태로: 평균 M z, 분산 R_p + zᵀ (H + I)⁻¹ z.
+  - λ_p는 q_p 자리에 칸별 하나, σ_p², R_p와 함께 같은 경험적 베이즈로 맞춘다.
+  - 구현은 지금처럼 순차 scan으로 둔다. 이 시험은 형태가 되는지 보는 것이지 속도가 아니다.
+- 쓰지 않는 판: 사전까지 감쇠시키는 공분산 팽창 (P ← P / λ). 관측 안 된 방향의 P가 끝없이 커진다 (windup).
+- 비교: RLS (Q = 0) 73.4%, 더하는 Q 84.4% (12.9, 12.13).
+- 함께 기록: 맞춘 λ_p와 유효 창 1/(1 − λ_p), 도착 순간 쓰인 몫, 그리고 **12.13 분해** (12.13에서 맞춘 σ², R은 그대로 두고 q만 0으로 한 판정).
+  12.13에서는 Q를 넣으면서 도착 칸 σ²도 0.0005 → 0.0039로 같이 바뀌어, 73 → 84%가 과정 잡음 덕인지 σ² 재적합 덕인지 갈리지 않았다.
+- 읽기: 84% 근처면 곱하는 망각으로 대체한다. RLS 쪽에 가까우면 더하는 Q의 무엇이 필요했는지 본다.
+  더하는 Q는 P가 작은 (잘 정해진) 방향일수록 상대적으로 크게 불확실해지고, 곱하는 망각은 데이터가 정한 방향을 모두 같은 비율로 키운다.
+- 12.13 기록의 단위 정정: "256스텝 동안 늘어나는 P (≈ 0.0046)가 사전 분산 σ² (0.0039)과 비슷"은 틀렸다. 코드에서 사전은 P₀ = I이고 σ는 z 안에 있다.
+  Q가 256스텝에 더하는 0.0046은 사전의 0.46%이고, 사전 수준까지는 약 1/q 스텝 (도착 칸 약 5.5만, 도장 칸 약 1.4만, 지도 칸 20만–50만) 걸린다. 쓴 방향의 사후 P에 비해 얼마나 큰지는 재지 않았다.
+
+**그 뒤 후보 (사용자 제안, 결정 안 됨)**: 긴 세션의 기억 한계를 다루는 두 방법.
+- **대역폭 여러 개**: λ가 다른 시냅스 여러 개 (가장 긴 것은 수만 스텝). 각 시냅스는 게이트 없는 누적합이라 병렬이다.
+  어느 대역을 믿을지는 읽을 때 각 대역의 순차 예측 우도로 정한다 (베이즈 모형 평균). 이 가중치는 쓰기로 되돌아가지 않으므로 증거를 쓰면서도 병렬이다 (위의 단계형 후보와 같은 꼴).
+  한계: 긴 대역은 그동안의 모든 쓰기를 담아 선형 용량 (키 차원)에 걸린다 (R1 결과 5절, 키 64개에서 "확실한데 틀린" 읽기 7.6%). 흔적 극 늘리기 (12.10)는 주소 쪽 시간척도라 이것과 다른 축이다.
+- **공고화**: 일정 간격으로 빠른 시냅스의 내용을 더 크고 느린 저장소로 옮긴다 (상보적 학습계의 해마 → 신피질).
+  옮길 곳은 세계 공통인 느린 가중치가 아니라 세션 (세계) 전용 저장소여야 한다. 세계마다 다른 사실 ("b1에서 B")을 공통 가중치에 쓰면 다른 세계를 오염시키고, 이는 시험 때 가중치를 파인튜닝하는 것과 같다.
+  무엇을 옮길지는 칼만 상태가 정한다 (사후 P가 작은 = 믿을 만한 내용). 용량 문제를 직접 다루는 쪽은 이것이다. **→ 다음 절차 2–3으로 채택 (0.3절).**
+- 둘 다 기억 한계가 실제로 걸리는 과제 (세션 길이와 사실 수가 시냅스 용량을 넘음)에서 재야 한다. errand (보존 256스텝)에서는 보존 시간이 실패 원인이 아니었다.
+- 문헌과 토이 (2026-11-16 자유연구): [`consolidation/README.md`](consolidation/README.md). 요지: 재생으로 옮길 때는 복사가 아니라 이동이어야 하고 (잔차를 쓰는 순간 기준으로 굳히면 이중 계산이 폭주), 시냅스를 "현재 느린 모델에 대한 잔차"로 유지하면 느린 쪽이 배운 만큼 시냅스가 저절로 빈다. 대역폭 여러 개는 Kording 외 2007의 다중 시간척도 칼만 필터와 같다 (결정 안 됨).
+
+### 0.3 절차 2–4의 명세 (사용자 결정, 2026-11-16)
+
+근거와 토이: [`consolidation/README.md`](consolidation/README.md) (2–4절). 토이 코드 `rltdp/consolidation/toy.py`.
+
+**2. cr+replay (12.13 위에): 설계도**
+
+출발은 12.13 구성 그대로다 (`scripts/world/diag_20261115/eb_scale.py`, `QN=1`). 더하는 Q, 난수 키, 주소 극 {0, 8}, 키 128, 손 선호 판정, 시드 1, 세계 256개.
+σ_p², R_p, q_p는 12.13에서 맞춘 값을 쓰고 다시 맞추지 않는다. 코드 기호는 그 스크립트를 따른다: 칸 p = 0..11 (NP), 칸 특징 차원 H = 8, x = e.reshape(-1) ∈ R²⁵⁶ ([지금 키; 흔적]), z_p = σ_p x, 잔차 r_p = feat(o′)_p − μ⁰_p.
+
+- **세션 저장소의 특징 φ** (모든 칸 공통): φ = unit(ReLU(W_φ x)), W_φ ∈ R^{1024×256} 고정 난수 (성분 N(0, 1/256), 시드 고정).
+  비선형이어야 하는 이유: 선형 사영이면 S φ = (S W_φ) z라 시냅스와 같은 함수 집합이 되어 용량이 늘지 않는다. 무작위 ReLU 특징은 다른, 더 큰 함수 집합이다 (토이에서 φ와 z가 서로 다른 무작위 부호였던 것에 해당).
+- **세션 저장소 S_p** ∈ R^{8×1024} (칸별), 0에서 시작. 잔차 공간을 예측한다: S_p φ ≈ r_p.
+- **시냅스 (cr, 값 확장)**: 지금의 칸별 칼만을 그대로 두고, 같은 이득 g = P z / (R + zᵀ P z)로 두 내용 행렬을 함께 갱신한다.
+  - M_r ← M_r + (r − M_r z) gᵀ (지금의 M과 같음)
+  - M_φ ← M_φ + (φ − M_φ z) gᵀ, M_φ ∈ R^{1024×256} (칸별)
+  - 시냅스가 맡은 몫 (현재 S 기준 잔차의 사후 평균): M_t = M_r − S M_φ. 칼만 평균이 목표에 선형이고 이득이 z에만 의존하므로 정확하다.
+- **합친 예측 (칸 p)**: ŷ = S φ + M_t z = M_r z + S (φ − M_φ z).
+  해석: 시냅스가 이 입력을 알아보면 (M_φ z ≈ φ) 시냅스가 답하고, 모르면 (M_φ z ≈ 0) 저장소가 답한다. 따로 게이트를 두지 않아도 된다.
+- **깨어 있을 때 S 쓰기**: 매 스텝 S ← S + η_a (r − S φ) φᵀ, η_a = 0.05 (자기 오차, 토이의 cr과 같음). C 도착 뒤에는 M과 함께 쓰지 않는다 (stop_t).
+- **입력 버퍼**: 스텝마다 (x_j, φ_j)를 넣는다. 목표값은 넣지 않는다. 길이는 교사 세션 전체 (최대 약 510).
+- **잠**: K = 64스텝마다 한 번, 그리고 교사 세션 끝 (C 도착 뒤, 판정 전)에 한 번. 버퍼의 모든 j를 무작위 순서로 n = 5번 훑는다:
+  S ← S + η_s (M_t z_j) φ_jᵀ, η_s = 0.05. 여기서 M_t z_j = M_r z_j − S M_φ z_j를 현재 S로 매번 다시 계산한다.
+  목표가 지금의 믿음 S φ + M_t z이므로 오차가 M_t z 자체다 (시냅스가 교사). 시냅스가 입력을 알아보는 동안에는 합친 예측이 그대로이고 몫만 옮겨 간다.
+  값의 근거: 세션 초반에 쓴 사실 (관찰 단계의 b1)은 잠 약 8번 × 5번을 거쳐 (0.95)⁴⁰ ≈ 0.13만 시냅스에 남는다 (대부분 옮겨짐). 세션 끝의 C는 마지막 잠 한 번 (0.95⁵ ≈ 0.77)이라 일부만 옮겨진다.
+- **판정**: 지금처럼 끝 기억을 고정한 채 채집처마다 경로를 흉내 내고, 도착 칸 (SLOT)에서 cos(ŷ, g_B)로 고른다 (동점 무작위). 경로를 따라 x, z, φ를 같은 식으로 계산한다. 읽기 넷:
+  - (i) 합친 기억 ŷ = M_r z + S (φ − M_φ z)
+  - (ii) 저장소만 ŷ = S φ
+  - (iii-a) 저장소 없는 실행 (S를 만들지 않음) = 12.13 재현. **84.4%가 나와야 한다** (구현 확인)
+  - (iii-b) 같은 실행의 시냅스 몫만 ŷ = M_t z
+- **함께 기록**: 각 읽기의 b1 / b0 / 다른 곳, 도착 칸에서 시냅스 몫 크기 |M_t z|와 저장소 몫 크기 |S φ| (잠마다), 마지막 잠 전후.
+- **대조 (선택)**: naive+replay. 시냅스가 쓰는 순간의 잔차 r − S_그때 φ를 그대로 굳힌다 (M_φ 없음). 잠은 같다. 토이에서 이중 계산으로 폭주했다.
+- **비용**: M_φ가 칸마다 1024 × 256이라 세계 하나에 약 12.6MB. 세계 256개를 한 번에 vmap하지 말고 나눠 돌린다 (호스트 RAM 30GB). 칸끼리는 독립이라 메모리가 모자라면 도착 칸 (SLOT)만 S, M_φ를 둬도 판정은 같다.
+- **읽기**: (i)이 84.4%보다 나빠지면 이중 계산이나 구현 문제. (ii)가 우연 (20%)보다 분명히 높으면 옮겨진 것이다. b0의 C는 마지막 잠에서만 옮겨지므로 (ii)에서는 b0 오답이 (i)보다 많을 수 있다.
+  errand에서는 시냅스가 넘치지 않을 수 있어 b1 상승은 기대하지 않는다. 이 단계는 실제 파이프라인에서 옮기기가 해 없이 되는지 확인하는 것이다.
+- 위 수치 (D = 1024, η_a, η_s, K, n)는 이 설계도의 기본값이다. 바꾸려면 실행 전에 근거와 함께 적는다.
+
+**3. 곱하는 망각 + cr+replay: 설계도**
+- 1단계의 정보형 위에 2단계를 얹는다. 칸별 상태 셋: H ← λ_p H + z zᵀ / R_p, G_r ← λ_p G_r + r zᵀ / R_p, C ← λ_p C + φ zᵀ / R_p.
+- M_r = G_r (H + I)⁻¹, M_φ = C (H + I)⁻¹, M_t = (G_r − S C)(H + I)⁻¹. 합친 예측과 판정 읽기 넷은 2단계와 같다 (iii-a는 1단계 재현).
+- λ_p, σ_p², R_p는 1단계에서 맞춘 값 그대로 (저장소 없이 맞춘 값). S, φ, 버퍼, 잠, 기본값은 2단계와 같다. 모두 누적합이다 (토이 `rltdp/consolidation/toy.py`의 `cr+replay`와 같은 꼴).
+- 읽기: 곱하는 망각에서는 시냅스가 잊은 내용이 저장소 예측으로 돌아간다 ("옮긴 뒤 잊기"). 그래서 (i)과 (ii)의 차이가 2단계보다 작아야 한다.
+
+**4. 후속 특징 쪽 설계 고민 (구현 전, 사용자 검토)**
+1–3의 결과를 받아 `world/sf_architecture.md`에 다음을 따져 적는다. 이론 검토가 필요하면 Codex 프롬프트를 써서 사용자 검수 뒤 보낸다.
+- **층 셋**: Ψ = Ψ⁰ (세계 공통, 세션 안 고정) + S φ (세션 저장소, 국소 규칙) + M z (시냅스). TD 목표에 다음 상태가 들어가 교차 통계가 둘 (φ_t, φ_{t+1})이 된다.
+- **정밀도까지 옮기기**: 행동 점수의 정보 항 ½ log(1 + zᵀPz/R)이 옮긴 뒤 잊은 내용을 "모른다"고 보면, 이미 아는 곳을 다시 탐색한다.
+  세션 저장소도 불확실성을 들어야 하고 (칼만/RLS형), 옮기기는 시냅스가 가진 정보만큼 저장소 정밀도를 늘리고 시냅스에서 덜어 내는 꼴이어야 한다. 재생 관측을 R짜리 새 증거로 넣으면 정밀도가 이중 계산된다. 정보 항은 합친 믿음의 불확실성으로.
+- **재생 입력의 출처**: 작은 입력 버퍼, 또는 시냅스가 φ도 저장할 때 입력 없이 시냅스 상태만으로 닫힌 꼴로 옮기기 (확인 안 함).
+- **믿음 재생의 근거**: 후속 특징의 Ψ는 흔적으로 퍼뜨린 값과 증거로 고친 믿음을 담는다. 날것 재생은 TD 목표를 재생 때마다 다시 계산해 가치를 다시 퍼뜨려야 한다. 토이에서 믿음 재생이 진 이유 (시냅스가 날것과 다른 것을 모름)가 여기서는 해당하지 않는다.
+- **넘친 시냅스의 확신 있는 오답** (토이 3.3): 잠 빈도, 덜 쓰기 (R1), 더 큰·희소한 시냅스 주소 중 어디서 풀지.
+- **시험 순서 다시 정하기**: `sf_architecture.md` 5절의 (1) γ > 0, (2) 세션 안 선호는 저장소 없이 할 수 있다. 그다음 순차 시험 (A 학습 → B 학습 중 시냅스가 넘침 → A로 복귀; 겉날개 → 드래곤 → 겉날개의 축소판)을 끼우고, (3)–(4) 자율 행동은 정보 항 문제 때문에 그 뒤.
+
+## 1. 설치와 확인
+
+```bash
+pip install -e .                 # torch ≥ 2.4, gymnasium 1.4.0, minigrid 3.2.0, numpy, scipy, matplotlib
+python -m pytest -q              # 39개 통과 (CPU 약 1분)
+```
+
+`data/`, `runs/`는 git에 없다. R1은 합성 과제, forage 월드는 JAX 안에서 생성하는 과제라 데이터가 필요 없다.
+
+forage 월드 (`rltdp/world/`)는 JAX다. 별도 환경 `/venv/jax`를 쓴다:
+```bash
+uv venv /venv/jax --python 3.12 && uv pip install --python /venv/jax/bin/python "jax[cuda12]==0.7.2" optax numpy   # RTX 5090에서 확인
+XLA_PYTHON_CLIENT_PREALLOCATE=false /venv/jax/bin/python -m rltdp.world.train --agent synapse --iters 960 --B 40 --L 32 --eval_every 80 --eval_B 1024
+```
+
+**결과는 `runs/`에만 두지 않는다.** `runs/`는 git에 없어서 머신이 바뀌면 사라진다 (11/14 이전 synapse·GRU·TDP 기록이 이렇게 사라져 다시 돌렸다).
+평가 기록 (`*.jsonl`)은 `docs/<계열>/results/<실행 이름>/`으로 복사해 커밋한다. `scripts/world/rerun_20261114.sh`가 그 예다 (5분마다 복사·커밋).
+
+## 2. 저장소 구조
+
+| 경로 | 내용 |
+|---|---|
+| `rltdp/common/` | 공통: MiniGrid 래퍼 (`minigrid_env.py`), 격자 유틸·MLP (`grid.py`), tdp-reasoner 블록 (`tdp_block.py`), 재현 버퍼 (`replay_buffer.py`) |
+| `rltdp/fep/` | 월드 모델과 능동적 추론 에이전트 구현: 정확한 우도 월드 모델 (조건부 흐름) 대 RSSM-VAE, DreamerV3식 상상 속 actor-critic, 선호분포·기대 자유에너지 actor, novelty (`bandit/`, `flows/`, `wm/`, `agent/`) |
+| `rltdp/btsp/` | TDP 흔적 위의 가소성 규칙으로 학습하는 에이전트 (LavaGap) |
+| `rltdp/memory/` | R1: 흐름형 연상 회상 과제와 쓰기 규칙 비교 (PyTorch). 결과 `docs/memory/r1_results.md` |
+| `rltdp/world/` | **현재 작업 (R3)**: forage 격자 (JAX)와 에이전트 synapse / gru / tdp / random / oracle. [`world/README.md`](world/README.md) |
+| `rltdp/icrl/` | 고정 크기 기억의 토이 실험 (`toy.py`: 충분통계, 망각, 플래토 게이트)과 사전학습 비교 (`arch.py`: 정밀도 가중 플래토 기억, Gated DeltaNet, 문맥 창 Transformer) |
+| `tests/` | 단위 테스트, 이론 검증 |
+| `scripts/` | 실행 스크립트 |
+| `docs/` | [`ROADMAP.md`](ROADMAP.md) (목표와 단계), 이 문서, 주제별 문서 (`fep/`, `btsp/`, `icrl/`), 날짜순 기록 (`progress.md`) |
+
+R1 설계에 직접 쓰이는 근거는 `docs/icrl/icrl_memory_gate.md`에 있다 (ROADMAP 5절 요약).
+
+## 3. 결정해 둔 것
+
+- 비교군은 DreamerV3. 공식 코드 (JAX) 그대로를 기준으로, 기억 모듈만 RSSM 결정론 경로에 끼운다.
+- 쓰기 규칙의 출발 형태는 칼만 쓰기 + 관련성 흔적. 자유 파라미터는 실행 전에 고정한다.
+- 주장에는 사전 예측 문서, 시드 여러 개, 가장 단순한 비교군과 가장 강한 비교군 (정답 게이트 상한 포함)을 붙인다.
+- 실패하면 문턱이나 손실을 덧붙이지 않고 요구의 형식화로 돌아간다.
+- (2026-11-14) R1 다음은 R2가 아니라 R3, 과제는 forage 월드 (0.1절).
+
+## 4. (끝남) R1 계획 — 기록으로 남김. 결과는 `docs/memory/r1_results.md`
+
+### 4.1 구현
+
+새 패키지 `rltdp/memory/`에 둔다 (제안):
+
+| 파일 | 내용 |
+|---|---|
+| `stream.py` | 과제 생성기. 손잡이: 중요 비율 ρ, 방해 구성 (잡음 / 반복 / 무관한 새것), 종류별 잡음 수준·중요도, 결과 (보상 토큰) 지연, 질의 지연 분포 (학습 길이의 수십 배까지), 흐름 길이 |
+| `models.py` | 같은 상태 크기의 기억들: Hebb 덧셈, 델타 규칙, Gated DeltaNet (학습 게이트), 칼만 쓰기 (+ 관련성 흔적), 정답 게이트 |
+| `train.py` | 느린 가중치 (키·값 사상, 종류 정밀도·관련성 예측기) 사전학습. Gated DeltaNet은 짧은 조각으로 학습 |
+| `eval.py` | 지연별 회상 정확도, 회상 거리, ρ·방해 구성·기억 크기·흐름 길이 훑기, 제거 실험 |
+
+참고할 기존 구현: Gated DeltaNet과 델타 쓰기 (`rltdp/icrl/arch.py`), 정밀도 가중 로그 우도비와 사건 뒤 흔적 (`rltdp/icrl/toy.py`).
+외부 참고: MQAR 과제 정의 (Zoology), memax의 Gated DeltaNet (`memax/equinox/semigroups/gdn.py`, 결합 스캔).
+
+### 4.2 순서
+
+1. 선행 연구 확인: 연관 기억의 칼만 / RLS 해석 (ROADMAP 2절).
+2. 사전 예측 문서 `docs/memory/r1_predictions.md`를 실행 전에 쓰고 고정한다 (ROADMAP 4절의 예측 표가 출발점).
+3. **R1-a**: 관련성 방해 없이 잡음·반복만. 칼만 쓰기 대 Hebb·델타·Gated DeltaNet·정답 게이트.
+4. **R1-b**: 무관한 새것을 더하고 관련성 흔적을 켠다. 회상 거리 ∝ 1/ρ와 정답 게이트 근접을 본다.
+5. 제거 실험 (정밀도·새로움·관련성), 길이 불변성 (학습 길이의 수십 배).
+
+### 4.3 성공 기준
+
+- 잡음·반복 방해를 늘려도 칼만 쓰기의 회상 거리가 유지되고, 델타·Hebb은 예측대로 무너진다 (R1-a).
+- 무관한 새것 속에서 회상 거리가 1/ρ에 비례하고 정답 게이트 상한에 가깝다 (R1-b).
+- 각 인자를 빼면 해당 방해에서 무너진다.
+- 학습 길이의 수십 배에서 곡선이 변하지 않고, Gated DeltaNet은 학습 길이 밖에서 회상 거리가 준다.
+
+연산: 합성 과제라 CPU로 시작할 수 있다. 훑기 (ρ × 방해 × 기억 크기 × 시드)는 GPU에서 병렬로.
+
+## 5. 그다음 (R2~R5)
+
+- **R2 유지·망각**: R1 과제에 "일부 연합만 단서 없이 값이 바뀜"을 더한다. 키 방향별 변동성이 바뀐 것만 고치고 나머지를 보존하는지, 정답 초기화 상한과 비교.
+- **R3 읽기**: 저장 항목이 많을 때의 읽기 간섭.
+- **R4 월드 모델**: DreamerV3 코드의 RSSM 결정론 경로에 기억을 넣어 Crafter / Craftax-classic 100만 스텝. 비교 수치: Craftax-classic에서 DreamerV3 53.2%, 개선된 TWM 약 67~70%, 숙련된 사람 65%.
+- **R5 마인크래프트**: DreamerV3 다이아몬드 설정 (`dreamerv3/configs.yaml`의 `minecraft` = `minecraft_diamond`, 기본 run 설정: 200M급 모델, bf16, 배치 16 × 64, train_ratio 32, 환경 16개, 1억 스텝).
+  - 원 논문: A100 하나로 9일. RTX 5090 하나면 7~12일로 추정 (처음 1~2시간의 초당 갱신 수로 다시 잴 것).
+  - 시스템 RAM: 기본 재현 버퍼 500만 스텝의 이미지만 약 61GB. CPU: MineRL 인스턴스 16개에 코어 약 16개, 인스턴스당 2~3GB. MineRL은 Java 8, Malmo 빌드, 화면 없는 서버에서는 가상 디스플레이가 필요할 수 있다.
+
+exec
+/bin/bash -lc 'rg --files rltdp/world scripts/world/diag_20261117 docs/world/results/synapse_layer_20261117 | sort' in /workspace/RL-TDP
+exec
+/bin/bash -lc 'cat docs/world/synapse_layer_spec_basic.md docs/world/synapse_layer_spec_mult.md' in /workspace/RL-TDP
+ succeeded in 0ms:
+docs/world/results/synapse_layer_20261117/cellkey.json
+docs/world/results/synapse_layer_20261117/cellkey.log
+docs/world/results/synapse_layer_20261117/cellkey_10k.json
+docs/world/results/synapse_layer_20261117/cellkey_10k.log
+docs/world/results/synapse_layer_20261117/cellkey_10k_params.npz
+docs/world/results/synapse_layer_20261117/cellkey_params.npz
+docs/world/results/synapse_layer_20261117/cellkey_params_qdiag.json
+docs/world/results/synapse_layer_20261117/cellkey_qdiag.log
+docs/world/results/synapse_layer_20261117/cellkey_r0_10k.json
+docs/world/results/synapse_layer_20261117/cellkey_r0_10k.log
+docs/world/results/synapse_layer_20261117/cellkey_r0_10k_params.npz
+docs/world/results/synapse_layer_20261117/codex_architecture_research.log
+docs/world/results/synapse_layer_20261117/codex_architecture_research_aborted1.log
+docs/world/results/synapse_layer_20261117/codex_architecture_research_answer.md
+docs/world/results/synapse_layer_20261117/decomp_r0.json
+docs/world/results/synapse_layer_20261117/decomp_r0.log
+docs/world/results/synapse_layer_20261117/spec1.json
+docs/world/results/synapse_layer_20261117/spec1.log
+docs/world/results/synapse_layer_20261117/spec1_params.npz
+docs/world/results/synapse_layer_20261117/token.json
+docs/world/results/synapse_layer_20261117/token.log
+docs/world/results/synapse_layer_20261117/token_params.npz
+docs/world/results/synapse_layer_20261117/zero_trace_judge.json
+docs/world/results/synapse_layer_20261117/zero_trace_judge.log
+rltdp/world/__init__.py
+rltdp/world/agents.py
+rltdp/world/credit.py
+rltdp/world/env.py
+rltdp/world/errand.py
+rltdp/world/errand_learned.py
+rltdp/world/errand_prec.py
+rltdp/world/errand_reuse.py
+rltdp/world/gate.py
+rltdp/world/gate_goal.py
+rltdp/world/gate_learned.py
+rltdp/world/gate_memory.py
+rltdp/world/gate_stream.py
+rltdp/world/goal_forage.py
+rltdp/world/integrated.py
+rltdp/world/tdp_agent.py
+rltdp/world/tdp_credit.py
+rltdp/world/train.py
+scripts/world/diag_20261117/synapse_cellkey.py
+scripts/world/diag_20261117/synapse_layer.py
+scripts/world/diag_20261117/synapse_token.py
+
+exec
+/bin/bash -lc 'cat docs/progress.md' in /workspace/RL-TDP
+ succeeded in 0ms:
+# 시냅스 층 기본형: 명세 (더하는 과정 잡음), 2026-11-17
+
+짝 문서: 곱하는 망각판 [`synapse_layer_spec_mult.md`](synapse_layer_spec_mult.md). 배경: `../HANDOVER.md` 0절 (2026-11-17 방향).
+
+## 0. 목적과 바뀌는 것
+
+- **목적:** 바깥에 붙은 무작위 키 조회표를, 망의 표현에서 학습된 사영으로 키를 만드는 kv 외적 누적 시냅스로 바꾼다. 쓰기 규칙을 고친 뒤 (12.7–12.13)의 조건에서 학습된 키가 무엇을 하는지 잰다.
+- **12.13에 비해 바뀌는 것:** 키 경로 하나. 무작위 키가 학습되는 키 사영과 학습되는 흔적 극으로 바뀐다.
+- **그대로인 것:** 느린 월드 모델 μ⁰ (학습된 것, 고정), 칸별 칼만 쓰기 (σ_p, R_p, q_p), 값 = 잔차, 손 선호 판정, 시드 1.
+- 초기값은 12.13의 무작위 키와 같다.
+
+## 1. 구성
+
+| 부품 | 식 | 상태 |
+|---|---|---|
+| 시야 표현 | w_t = feat(o_t)[0:9] (시야 9칸 × 8 = 72차원. HUD는 넣지 않음, 12.4) | 고정 임베딩 (12.13과 같음) |
+| 표현 변환 | u_t = w_t + MLP(w_t), MLP 72 → 128 (SiLU) → 72, 마지막 층 0으로 초기화 | 학습. 초기에는 u = w |
+| 키 (결정 시점의 상황 × 행동) | k̂_t = W_k[a_t] u_t, W_k[a] ∈ R^{128×72} (행동별), 초기값 = 12.13의 Wr[a] | 학습 |
+| 키 크기 | k_t = exp(ℓ_t) · k̂_t / ‖k̂_t‖, ℓ_t = 선형([w_t; onehot(a_t)]), 초기값 0 | 학습. 초기에는 단위 크기 (= 12.13) |
+| 인과적 시간 창 (흔적) | e_t = α e_{t−1} + k_t, α = sigmoid(θ_α), 초기 2^(−1/8) (반감기 8) | 학습 |
+| 주소 = 질의 | x_t = [k_t; e_t] ∈ R²⁵⁶, 칸별 회귀 입력 z_p = σ_p x_t | |
+| 값 (쓰기 목표) | r_p = feat(o_{t+1})_p − μ⁰_p(o_t, a_t) (느린 모델이 못 맞힌 몫) | |
+| 시냅스 | 칸별 M_p ∈ R^{8×256}, P_p ∈ R^{256×256}, 세션 시작에 M = 0, P = I | 세션 안 쓰기만 (역전파 없음) |
+| 칼만 매개변수 | σ_p, R_p, q_p (칸별, 36개), 초기값 = 12.13에서 맞춘 값 | 학습 (경험적 베이즈) |
+
+질의를 주소와 묶는 이유: 칼만 회귀에서 다음 잔차의 사후 예측은 M z이고 분산은 R + zᵀPz다. 별도의 질의 사영을 두면 이 예측 의미가 깨지고, 학습 목적 (주변 우도)도 정의되지 않는다.
+
+## 2. 한 스텝 (세션 안, 칸 p마다)
+
+1. k_t, e_t, x_t, z_p를 위 식대로 계산한다.
+2. 예측 (쓰기 전): 잔차 평균 M_p z_p, 분산 S_p = R_p + z_pᵀ P_p z_p. 다음 장면 예측은 μ⁰_p + M_p z_p.
+3. 과정 잡음: P_p ← P_p + q_p I
+4. 칼만 쓰기: g = P_p z_p / S_p, M_p ← M_p + (r_p − M_p z_p) gᵀ, P_p ← P_p − (P_p z_p)(P_p z_p)ᵀ / S_p
+5. C 도착 뒤에는 쓰지 않는다 (stop_t, 12.13과 같음).
+
+순서와 수치는 `scripts/world/diag_20261115/eb_scale.py`의 `write()` 그대로이고, 바뀌는 것은 1의 키 계산뿐이다. M은 시간에 걸친 (잔차 ⊗ 주소) 외적의 누적이고, 칼만 이득이 주소들 사이 상관을 풀어 준다 (델타 규칙과 Gated DeltaNet의 일반형).
+
+## 3. 학습 (느린 가중치, 여러 세계, 역전파)
+
+- **목적:** 학습 세계 교사 세션의 순차 예측 음의 로그우도.
+  - Σ_t Σ_p ½ [ ‖r_p − M_p z_p‖² / S_p + H log S_p ]
+  - 12.13 경험적 베이즈의 목적과 같은 식이다. 이 선형 가우시안 기억 모형의 음의 로그 증거, 즉 정확한 자유에너지다.
+  - 기울기는 칼만 재귀 (M, P)를 거쳐 키 매개변수와 σ, R, q로 흐른다. 세션 전체를 역전파하고, 스텝마다 `jax.checkpoint` (12.13과 같음).
+- **학습되는 것:** MLP, W_k, ℓ, θ_α, σ_p, R_p, q_p. μ⁰ (월드 모델)와 픽셀 임베딩은 고정.
+- **자료:** 학습 세계 1,024개 (시드 50,000–51,023), 검증 세계 128개 (51,024–51,151), 판정 세계 256개 (1,000–1,255, 12.13과 같음). 모두 같은 교사 경로.
+- **최적화:** Adam. 키 경로 lr 1e-3, 칼만 매개변수 lr 0.05 (12.13과 같음). 배치는 세션 8개.
+  - 100반복마다 검증 NLL을 재고, 가장 낮은 시점을 쓴다.
+  - 최대 2,000반복. 검증 NLL이 500반복 동안 나아지지 않으면 멈춘다.
+
+## 4. 판정과 기록
+
+- **판정:** 12.13과 같은 손 선호 판정. 끝 기억을 고정한 채 채집처마다 경로를 흉내 내고, 도착 칸에서 cos(M z, g_B)로 b1 / b0 / 다른 곳을 센다. 흉내 낸 경로에서도 키와 흔적을 같은 학습된 식으로 계산한다.
+- **기록:**
+  - 학습 전과 학습 뒤의 b1 / b0 / 다른 곳
+  - 검증 NLL 곡선
+  - 맞춘 α (반감기)와 σ_p, R_p, q_p
+  - 도착 순간 쓰인 몫
+  - 행동 종류별 키 크기 exp(ℓ) 평균: 상호작용 / 이동 / 대기 (12.2, 8절과 비교)
+  - 이웃 스텝 주소 코사인 (12.6에서 0.97이 문제였음)
+
+## 5. 비용
+
+- 세션 안 계산은 12.13과 같다. 칸마다 P가 256 × 256이고, 키 경로는 스텝당 작은 MLP 하나가 더해진다.
+- 학습 반복 하나는 12.13 경험적 베이즈 한 반복 (세션 8개 역전파)에 키 경로 기울기를 더한 것. 12.13은 200반복, 여기서는 최대 2,000반복.
+- 순차 scan. 더하는 Q는 누적합 꼴이 아니라 시간 병렬이 안 된다 (명세 2에서 다룸).
+
+## 6. 범위 밖
+
+- 월드 모델 μ⁰ 함께 학습
+- 시냅스 읽기를 뒤 층의 입력으로 넣기
+- 곱하는 망각 (명세 2)
+- 공고화 (느린 경로로 옮기기)
+- 후속 특징, 증거 망각
+# 시냅스 층, 곱하는 망각판: 명세 (명세 2), 2026-11-17
+
+짝 문서: 기본형 [`synapse_layer_spec_basic.md`](synapse_layer_spec_basic.md) (명세 1). 여기에는 명세 1과 다른 곳만 적는다. 진행 순서는 명세 1 → 명세 2 (읽기 기준 일부가 명세 1 결과에 기댄다).
+
+## 0. 목적과 바뀌는 것
+
+- **목적:** 시냅스 층을 시간 축으로 병렬 학습할 수 있는 꼴 (누적합)로 만든다. 모방·오프라인 사전학습으로 긴 궤적을 대량 학습하려면 필요하다 (`../HANDOVER.md` 0.2절).
+  12.15에서 무작위 키로는 곱하는 망각 단독이 65.6% (더하는 Q 84.4%)였다. 학습된 키 위에서 다시 잰다.
+- **명세 1에 비해 바뀌는 것:** 쓰기 하나. 더하는 과정 잡음 (P ← P + qI)이 곱하는 망각으로 바뀐다.
+- **그대로인 것:** 키 경로 (시야 표현, 표현 변환, 행동별 W_k, 키 크기 ℓ, 학습되는 흔적 극 α), 주소 = 질의, 값 = 잔차, 학습 목적·자료·최적화, 판정.
+- **초기값에서 12.15와 정확히 같아지도록** 둔다. 키 경로는 12.13의 무작위 키, 칼만 매개변수는 12.15에서 맞춘 값.
+
+## 1. 구성 (명세 1과 다른 줄만)
+
+| 부품 | 식 | 상태 |
+|---|---|---|
+| 시냅스 상태 (칸별, 정보형) | H_p ∈ R^{256×256}, G_p ∈ R^{8×256}. 세션 시작에 H = 0, G = 0. 사전 M ~ N(0, I)는 감쇠하지 않음 | 세션 안 쓰기만 |
+| 읽기 | M_p = G_p (H_p + I)⁻¹, 잔차 예측 M_p z_p | |
+| 칼만 매개변수 | λ_p = sigmoid(θ_p), σ_p, R_p (칸별, 36개). 초기값 = 12.15에서 맞춘 값 (`results/errand_diag_20261116/mult_forget.log` 마지막 줄). q_p는 없음 | 학습 (경험적 베이즈) |
+
+## 2. 한 스텝 (세션 안, 칸 p마다)
+
+1. k_t, e_t, x_t, z_p = σ_p x_t (명세 1과 같음)
+2. 감쇠: H_p ← λ_p H_p, G_p ← λ_p G_p
+3. 예측 (감쇠 뒤, 쓰기 전): 잔차 평균 M_p z_p, 분산 S_p = R_p + z_pᵀ (H_p + I)⁻¹ z_p
+4. 쓰기: H_p ← H_p + z_p z_pᵀ / R_p, G_p ← G_p + r_p z_pᵀ / R_p
+5. C 도착 뒤에는 쓰지 않음 (stop_t)
+
+**누적합 꼴:** H_t = Σ_j λ^{t−j} z_j z_jᵀ / R, G_t = Σ_j λ^{t−j} r_j z_jᵀ / R. 주소 z_j는 기억 내용과 무관하다 (키 경로만의 함수). 그래서 학습 때 조각 안을 시간 병렬로 계산할 수 있다 (MesaNet과 같은 꼴). 읽을 때는 스텝마다 (H_t + I)를 풀어야 한다.
+
+## 3. 수치 구현 (12.15 그대로, 필수)
+
+- 곱하는 망각은 P에 바닥이 없다. 같은 방향에 계속 쓰면 분산이 약 (1 − λ)R / |z|²로 내려가 float32에서 P가 양정치를 잃는다. 12.15에서 정보형·공분산형 모두 반복 100에서 NaN.
+- 제곱근 공분산형 (`scripts/world/diag_20261115/eb_scale.py`의 `mult_step`). P = (H + I)⁻¹ = S Sᵀ로 두고 M과 S를 들고 간다.
+  - **감쇠:** C = λI + (1 − λ) SᵀS를 촐레스키 분해 (C = LLᵀ). M ← M − (1 − λ) M S C⁻¹ Sᵀ, S ← S L⁻ᵀ.
+  - **쓰기 (Potter):** f = Sᵀz, α = 1 / (R + |f|²), γ = 1 / (1 + √(αR)), K = α S f. M ← M + (r − M z) Kᵀ, S ← S − γ K fᵀ.
+  - **예측 분산:** R + |Sᵀz|² (구조상 양수).
+- 행렬곱 정밀도 `highest`를 쓰기와 **판정 경로 모두**에 둔다. 12.17에서 판정 경로 정밀도가 달라 12.15와 3세계 (65.6% 대 64.5%) 어긋났다.
+- 병렬 꼴 (누적합 + 스텝별 풀이)은 이번 시험에서 구현하지 않는다. 이 시험은 형태가 되는지 보는 것이고 속도가 아니다.
+  - 선택 확인: 세션 하나에서 float64 누적합 꼴과 순차 구현의 예측이 같은지 (상대오차 1e-5 이하).
+
+## 4. 학습 (명세 1과 같음, 다른 점만)
+
+- **목적:** 순차 예측 음의 로그우도. S_p는 2의 3 (감쇠 뒤 분산).
+- **학습되는 것:** 키 경로 전부 + θ_p, σ_p, R_p.
+- 자료, 배치, lr (키 경로 1e-3, 칼만 매개변수 0.05), 검증 기반 조기 종료는 명세 1과 같다.
+- **비용:** 칸마다 스텝당 256 × 256 촐레스키 하나와 삼각 풀이. 12.15에서 세션 8개 배치에 반복당 2.7초. 최대 2,000반복이면 약 1.5시간.
+
+## 5. 판정과 기록
+
+명세 1과 같다. 더 기록할 것:
+- 맞춘 λ_p와 창 1/(1 − λ_p). 12.15와 비교 (세계 칸 23–74스텝, 도착 칸 190스텝).
+- 키 크기와 창의 관계.
+
+## 6. 사전 예측과 읽기 기준 (실행 전에 고정)
+
+| | 예측 / 기준 |
+|---|---|
+| 학습 전 | b1 = 12.15 값 (`highest` 정밀도로 다시 잰 값, 64.5–65.6%). 검증 NLL = 12.15 매개변수의 값. 다르면 멈추고 고침 |
+| 학습 뒤, 증거 | 검증 NLL이 학습 전보다 낮다 |
+| 학습 뒤, 학습 이득의 크기 (방향만) | 명세 1보다 크다 |
+| 채택 기준 (사용자, 2026-11-16) | b1 80%대면 병렬형으로 충분히 고려 |
+
+"학습 이득이 명세 1보다 크다"의 근거: 곱하는 망각에서 한 번 쓸 때 들어가는 정보는 |k|² / R에 비례하고, 정상 상태 정밀도는 |k|² / (R(1 − λ))에 비례한다. 그래서 학습된 키 크기가 드물지만 중요한 스텝 (상호작용)에서 망각을 보상할 수 있다. 더하는 Q에는 이 경로가 약하다.
+
+읽기:
+- **80% 이상:** 시냅스 층을 병렬형으로 둘 수 있다. 이후 단계 (공고화, 후속 특징)를 이 꼴로 진행.
+- **명세 1과 ±3점 안 (명세 1이 80% 미만이어도):** 망각 형태는 병목이 아니다. 병렬형을 택한다.
+- **명세 1보다 3점 넘게 낮고 80% 미만:** 곱하는 망각이 잘 정해진 방향까지 같은 비율로 잊는 손해 (12.15)를 키 학습이 메우지 못한 것. 병렬화는 다른 길 (더하는 Q의 결합 스캔 d³, 또는 청크 지연)로 남긴다.
+- **증거는 좋아졌는데 b1이 학습 전보다 3점 넘게 떨어짐:** 명세 1과 같이 읽는다 (증거 목적과 판정의 어긋남).
+
+## 7. 범위 밖과 단서
+
+- 범위 밖은 명세 1과 같다.
+- 곱하는 망각은 고정된 선형 가우시안 동역학이 없다 (암묵적 과정 잡음이 믿음 P에 의존). 학습 목적은 생성모형의 증거가 아니라 이 순차 예측 절차의 예측 우도다 (12.15의 자유에너지 관점 단서). 명세 1의 목적은 정확한 증거다.
+
+ succeeded in 0ms:
+# 진행 기록
+
+## 2026-11-08
+
+### 저장소 기반
+- `pyproject.toml`: 의존성 고정 (`gymnasium==1.4.0`, `minigrid==3.2.0`). 환경: PyTorch 2.11 cu128, RTX 5090.
+- 결정 사항은 `docs/fep/handover/02-spec.md` 맨 위 "변경 이력"에 적는다 (시드 1개 시작, 흐름 블록 4개, 2a 평가는 32스텝 조각, V2 생략).
+
+### 1단계 7절 이론 검증 (`tests/fep/theory/`, `pytest tests/fep/theory`)
+
+| ID | 결과 | 테스트 |
+|---|---|---|
+| V1 | ✅ 세 형태 1e-9 이내 일치 (K = 2, 3, 5) | `test_free_energy_decomposition.py` |
+| V2 | 생략 (입력값 없음) | |
+| V3 | ✅ 정확한 항등식 1e-12, 에르고딕 사슬 10⁶스텝 시간 평균 5e-3 이내 | `test_free_energy_decomposition.py` |
+| V4 | ✅ 임의 q에서 KL 항 θ 기울기 ≠ 0, ∇F = ∇KL − ∇ln p, q = 사후분포에서 < 1e-12 | `test_free_energy_decomposition.py` |
+| V5 | 미실시 (원문 대조) | |
+| V6 | ✅ 1차원·2차원 조건부 흐름 밀도 적분 = 1, 결정론적 기억을 둔 2스텝 결합 밀도 적분 = 1 | `test_invertible_likelihood.py` |
+| V7 | ✅ σ → 0에서 정확도 항·KL 항은 십진 단위마다 +2.3씩 발산, F는 변수 변환 값으로 수렴 | `test_invertible_likelihood.py` |
+| V8 | 보류 (구현 후 IWAE와 비교) | |
+| V9 | ✅ T자 미로 갈림길에서 I = 1비트 | `test_invertible_likelihood.py` |
+| V10 | ✅ 균등 탈양자화 F = KL[q ‖ p(u\|x)] − ln P(x) | `test_dequantization_and_efe.py` |
+| V11 | ✅ 0 ≤ A_deq ≤ ln(sup/inf) | `test_dequantization_and_efe.py` |
+| V12 | ✅ 위험 + 모호성 = −실용 가치 − 정보 이득 | `test_dequantization_and_efe.py` |
+| V13 | ✅ 미래 F = G + 정보 이득, 정보 이득 ≥ 0 | `test_dequantization_and_efe.py` |
+| V14 | ✅ 결정론적 디코더에서 모호성 = 0, 정보 이득 = H[Q(o)] | `test_dequantization_and_efe.py` |
+| V15 | ✅ 앙상블 공식 = 결합분포에서 직접 계산한 상호정보량, 동일 멤버면 0 | `test_dequantization_and_efe.py` |
+| V21, V22 | 미실시 (논문 PDF 원문 대조 필요) | |
+
+### 실험 1: 고리 vs 가우시안 밴딧 (시드 0) ✅
+- 실행: `./scripts/fep/exp1.sh` → `python -m rltdp.fep.bandit.report` → `runs/exp1/report/` (report.md, 그림 E1-1, E1-2)
+- 예비 결과(JAX) 재현: M0 P(고리) 0.493 (예비 0.48~0.50), M1-a 0.229 (0.22~0.23), M1-b(k=1) 0.371, Â_고리 0.29 (예비 0.373, 0.27)
+- 용량-반응 (M1-b): k = 1, 5, 50에서 Â_고리 0.29 → 0.12 → 0.03, P(고리) 0.371 → 0.457 → 0.487. **간극이 줄면 선택 편향도 같은 방향으로 준다.**
+- M1-a는 k와 무관하게 잠재를 쓰지 않고 고리를 가우시안 하나로 맞춘다 (Â ≈ 0, B̂ = 1.21). IWAE로도 이 해에서 빠져나오지 못했다.
+- 용량 비교: M0는 결합층 2 → 4 → 12에서 P(고리) 0.366 → 0.487 → 0.493 (B̂가 줄어서). M1은 은닉 128 → 320(파라미터 6배)에서 거의 그대로 (M1-a 0.229 → 0.229, M1-b 0.371 → 0.379).
+- 문서 완료 기준 중 "시드 5개 이상"은 변경 이력에 따라 시드 1개로 대체했다.
+
+### 실험 2 단계 0: 환경과 데이터 (`rltdp/common/minigrid_env.py`, `rltdp/fep/collect.py`, `tests/common/test_memory_env.py`) ✅
+- 래퍼: 관측 = (격자 인덱스 7×7×3, 방향, 결과). 시간 초과도 실패로 둔다. 모델 입력은 `to_onehot()`으로 20×7×7.
+- 스크립트 정책: 특권 정보(맵)로 BFS. 단서 물체가 보이는 자세까지 간 뒤 success_pos로 간다. 매 스텝 재계획.
+  - ε = 0: 300개 시드 성공률 100%, 길이 10~13 (문서 "10~15스텝"과 일치)
+  - ε = 0.2: 성공률 98~99%, 길이 평균 15, 최대 31
+- 무작위 정책: 길이 평균 약 370, 최대 845 (문서 "평균 약 390"), 성공률 약 0.4
+- 데이터 (`data/memory/`, `python -m rltdp.fep.collect`):
+  - train: 시드 0~499 스크립트(ε = 0.2) + 500~999 무작위, 관측 193,728개
+  - holdout: 시드 1,000,000~ 무작위 50 + 스크립트 50, 관측 17,677개
+  - 스텝마다 구간 라벨(방 x ≤ 3 / 복도 4~9 / 갈림길 x ≥ 10)을 같이 저장한다 (구간별 간극 표용)
+
+### 실험 2 단계 1: 흐름과 들어 올림 (`rltdp/fep/flows/`, `tests/fep/test_flow_and_lift.py`) ✅
+- `argmax_lift.py`: 임계값 방식 q(v|x), 역변환 `log_q_given` (IG 계산용)
+- `flow.py`: Glow형 블록 4개 (ActNorm 항등 초기화 → LU 1×1 conv → affine coupling, 마스크 channel/checker 번갈아), 공유 조건 선형층 16채널, 기저 N(μ(h), σ(h))
+- 통과한 기준:
+  - 역변환 오차: float64 < 1e-5 (실측 ~1e-13). **float32에서는 반올림 때문에 5e-6~2e-5** 이므로 기준은 float64에 적용하고, float32는 5e-5를 감시선으로 둔다 (해석 결정)
+  - 2차원 장난감 흐름 밀도 적분 = 1 ± 1e-3 (channel 분할, checker 두 경우)
+  - argmax(v) = x 항상 성립, ln q의 log-det = 자동미분 야코비안 (K = 3, 6, 11)
+  - 범주 3개 장난감에서 Σ P̂(x) = 1 ± 1e-2 (샘플 200만 개 필요, 아래 참고)
+
+### 발견: 고정 q를 제안분포로 쓰는 중요도 가중 추정의 분산
+고정 q(v|x)는 범주 경계(v_i → T) 근처에서 밀도가 어떤 거듭제곱보다도 빨리 0으로 간다. 반면 p(v|h)는 경계에서도 밀도가 양수이므로 가중치 p/q의 분산이 **무한대**다. 장난감 예시에서 유효 샘플 비율은 0.1~9%였다.
+- 학습 손실(ELBO, KL[q ‖ p] 방향)에는 문제가 없다.
+- 잠재 영향: 2a의 M0 이산 로그우도 ℑ̂(샘플 1,000개 중요도 가중)가 크게(P̂는 작게) 치우치고, Â_deq = F − ℑ̂이 작게 추정될 수 있다.
+- 단, 장난감 테스트의 p는 q와 무관한 가우시안이라 최악에 가깝다. 실제 M0는 ELBO 학습으로 영역 안에서 p(v|h)가 q를 닮도록 밀리므로, 실제 영향은 더 작을 수 있다. **현재는 결함이 아니라 확인 항목이다.**
+- 확인 방법: 2a 평가에서 샘플 100·1,000 수렴 확인(문서 요구)에 유효 샘플 비율을 함께 기록한다. 수렴하지 않으면 대안(측정 전용 제안분포, q 학습 여부 재검토)을 사용자와 상의한다.
+
+### 실험 2a 진행 상황 (2026-11-08 기준, 중단)
+- 손실 정규화: 시간 평균으로 변경 (변경 이력 참고)
+- 흐름 M0 (시드 0): 50,000회 완료. 보류 F 54.2, Â_deq ≥ 24.2 (F − ℑ̂ 하한), ℑ̂(S=1000) 30.0 (위로 치우침), 1스텝 정확도 샘플 0.734 / 최빈값 0.987
+  - 40,000회 체크포인트 probe (128프레임): ℑ̂ S = 10²/10³/10⁴/10⁵ → 37.5/32.6/30.1/27.6. 유효 샘플 비율 약 0.003%. τ = 2 제안분포는 악화(약 750)
+  - 결론: 고정 q 들어 올림은 학습 목적함수에 큰 간극을 넣고, 우도도 믿을 만하게 잴 수 없다
+- M1 (시드 0): 10,000회에서 중단. 5,000회 F 3.35 / 10,000회 F 0.39, 1스텝 샘플 정확도 0.984 (직전 시야 복사 기준 0.637)
+- M0F (칸별 독립 범주형, M1 디코더에서 s만 뺀 모델): 스모크 1,000회만. F = ℑ = 65.8 (같은 시점 M1 ℑ̂ 6.8)
+- M0 설계 방향은 미정. 사용자 결정 대기
+- 체크포인트 정책: 평가마다 ckpt/u<update>.pt (가중치만, 약 11MB), last.pt (재개용, 최신 1개), 디스크 여유 2GB 미만이면 스냅숏 생략
+
+### M0 변형 탐색: M0F, M0F-S (2026-11-08, 설계 결정 아님)
+- **성격**: 인수인계서 M0의 가역 인코더–디코더(1단계 중심 명제: 가역·결정론적 사상 → F = 정확한 놀람)를 **통째로 제거**한 변형이다. 잠재 공간 없이 기억 h(와 직전 시야)로 다음 관측의 범주 확률을 바로 내는 시간 방향 자기회귀 예측기다. 간극 0의 근거가 "가역이라서"가 아니라 "잠재가 없어서"로 바뀐다. 설계 결정 표(D1·D4·D7)는 아직 고치지 않았다.
+- M0F: M1 디코더에서 s 입력을 뺀 칸별 독립 범주형. 스모크(1,000회) ℑ 65.8
+- M0F-S: M0F + 직전 시야 연결(디코더가 o_{t-1}, a_{t-1}을 칸 위치 그대로 받음). 50,000회: 보류 ℑ 2.88 (정확값), 1스텝 정확도 0.975/0.984
+  - 손실의 83%가 조각 첫 스텝(맥락 없음, ℑ 69.8 vs M1@10k 7.25). 전진 0.052, 회전 평균 0.7~0.8 (중앙값 0.003)
+  - 원인: 맥락이 없으면 시야가 통째로 불확실(서로 다른 시야 109가지). 칸별 독립은 총상관(학습 데이터 기준 Σ H(칸) 37.15 − H(시야) 4.50 ≈ 33 nats)만큼 손해
+- M1-S(M1 + 같은 직전 시야 연결): 스모크만 (1,000회 ℑ̂ 5.7)
+- 알려진 비교상의 비대칭: M1은 사후 네트워크가 공유 임베더로 현재 관측을 처리하므로, 공유 골격이 받는 학습 신호가 M0 계열과 다르다
+- 설명 페이지: https://claude.ai/artifact/LpLVCP4xVJtoyGPPQDpXMS
+
+### 흐름 M0 재검토: M0-S, M0-SQ (2026-11-08)
+- M0-S (흐름 M0 + 직전 시야 연결, 고정 q) 50,000회: F 46.4, ℑ̂ 25.4, 간극 하한 21.0, 1스텝 샘플 정확도 0.746. 원래 M0(F 54.3)보다 약간 나을 뿐
+- **원인 확인**: Argmax Flows 원문(Hoogeboom et al. 2021)은 q(u|x)를 학습한다. 인수인계서 D4의 고정 q는 원 방법에서 벗어난 휴리스틱이었고, 구현 시 원문 대조를 하지 않았다
+- M0-SQ (M0-S + 학습되는 조건부 대각 가우시안 q(u|x), 출력 층 0 초기화로 고정 q에서 출발) 스모크 1,000회: F 15.1 (M0-S 165.6), ℑ̂ 8.2, 간극 하한 6.9, 유효 샘플 0.70%, 1스텝 샘플 정확도 0.84
+- M0-SQ 50,000회 본 학습 진행 중
+- **M0-SQ 50,000회 결과** (보류): F 1.10, ℑ̂ 0.45 (S=100 0.48 → 수렴), 간극 하한 0.65, 유효 샘플 38%, 1스텝 정확도 0.985/0.988, 10스텝 0.979/0.979. 갱신 24.3 ms (평가 포함), 파라미터 3,002,399
+  - 스텝별 ℑ̂: 조각 첫 스텝 11.0 (M0F-S 69.8, M1@10k 7.25), 회전 0.07, 전진 0.09. 간극 하한: 첫 스텝 5.7, 그 외 약 0.46
+  - 아직 남은 비교: 같은 조건(직전 시야 연결, 50,000회)의 M1-S
+- **M1-S 50,000회 결과** (보류): F 0.297, ℑ̂ 0.244 (S=100 0.249), 추론 간극 하한 0.053, 유효 샘플 96.5%, 1스텝 0.984/0.985, 10스텝 0.979/0.982. 갱신 11.2 ms, 파라미터 2,939,163
+  - 스텝별 간극 하한: 회전 0.001, 전진 0.003, 조각 첫 스텝 1.50 (ℑ̂ 6.14)
+  - **해석**: 기억이 있으면 다음 시야가 거의 결정되므로 사후분포가 사실상 한 점이고, M1의 추론 간극이 거의 0이다. 간극은 맥락 없는 첫 스텝에만 남고, 그곳에서는 M0-SQ의 이산화 간극(5.7)이 더 크다. 실험 2a(이 과제)에서는 정확한 우도가 이점을 낼 여지(줄일 간극)가 거의 없다
+  - 다음 방향(그대로 보고 / 2b 등)은 사용자 결정 대기
+
+## 2026-11-10
+
+### 실험 2f 구현 (실행 전)
+- `ActorCriticEFE` (`rltdp/fep/agent/efe.py`) = ActorCriticKL + 명시적 선호분포 C(y) = softmax(c/λ_C) + 공통 novelty 정보 이득 (`rltdp/fep/agent/novelty.py`). 설계: `docs/fep/exp2f_design.md`
+- ActorCriticKL은 흡수 종료 덕분에 결과 채널 선호를 이미 상수 차이로 정확히 구현하고 있었다. 기본값·β = 0에서 두 actor는 같은 목적이고, 실질적인 차이는 novelty 항이다
+- novelty 정보 이득은 결합 MC 추정(불편, [0, ln K])이 기본. 칸별 JSD 합은 상한이다 (설계 2판 5.2절 표현 정정)
+- 테스트 34개 통과(CPU). 실행은 GPU에서 `./scripts/fep/exp2f.sh`
+
+### 실험 2g 준비: M0-SQ의 GRU 기억을 TDP 기억으로 교체 (실행 전)
+- `rltdp/fep/wm/tdp.py`: tdp-reasoner의 band_product 블록을 환경 시간 축에 옮긴 것 (블록 한 번 = 환경 한 스텝). 토큰 52개 = 칸 49 + 방향·행동·결과. 흐름 조건과 기저 분포는 칸 토큰에서 칸별 선형으로, 방향·결과 머리는 해당 토큰에서 읽는다. 직전 시야 연결은 뺐다
+- 모델: `m0sqt` (M0-SQ-T), `m0sqt0` (시냅스 M을 뺀 대조군). 학습 조각마다 흔적은 0에서 시작. 대역 주기 처음 값 (2, 8, 32, 128)
+- `rltdp/fep/wm/train.py`: `--device`, `--eval_chunks`(보류 조각을 고르게 뽑음), `--eval_S`
+- `tests/fep/test_tdp_memory.py`: 인과성, 시냅스 식 = 복소수 직접 계산, 대조군 = 계수 0, step = rollout, 손실·평가가 끝까지 돈다. 전체 테스트 39개 통과(CPU)
+- MemoryS13 데이터(`data/memory`)를 다시 수집했고 기록과 같다 (학습 193,728, 보류 17,677). 학습 실행과 시간 측정은 아직 하지 않았다
+
+## 2026-11-12
+
+### 연상기억 에너지로서의 F (방안 B) 이론 정리
+- `docs/fep/memory_energy_theory.md`: 숨은 변수 "어느 기억에서 왔는가" 위의 혼합 생성 모델에서 에너지 U = −ln p(o, s), F* = U의 정확한 주변화 = −ln p(o) = 현대 홉필드 에너지. 쓰기 = 빠른 학습(비모수 베이즈 갱신), 읽기 = 추론, 배치 1. tdp-reasoner의 M은 이 혼합의 1차(고전 홉필드) 근사이자 시간 연상 기억. 구현·수치 확인 없음
+
+### 능동적 추론식 통합안과 TDP 가소성 강화학습 제안 (문서만)
+- `docs/fep/aif_integration.md`: critic을 월드 모델의 "기하 수평선 미래 결과" 예측 머리로 바꾸고, 정책을 G 위의 추론(softmax)으로 두는 통합안
+- `docs/btsp/tdp_plasticity_rl.md`: 자유에너지 계열과 별개로, TDP의 키·값 흔적을 적격 흔적으로 쓰는 강화학습 제안 두 가지
+  - A. TDP-DA (3요소): 키 흔적 × 행동 표본 편차의 키 선행 쌍 = 적격 흔적, TD 오차가 장기 시냅스로 옮김. 가소 경로에 대해 정확한 액터-크리틱 + 적격 흔적(γλ = 1 − η). b = 0인 bands-EMA 기억이 곧 적격 흔적
+  - B. TDP-BTSP: 키 흔적 = ET, 플래토 흔적 = IS, Milstein et al. 2021의 가중치 의존 양방향 규칙(독립적 q₊, q₋)으로 시냅스별 순간 겹침에 따라 틀을 덮어씀. 사건 근접장(목표·위험)으로 행동 선택
+
+### PoC 마무리, M1 + TDP 기억 + BTSP 시냅스로 방향 전환 (설계만)
+- `docs/btsp/m1_tdp_btsp_design.md`: RSSM(M1)의 GRU를 TDP 기억(상시 STDP, 작업 기억)으로 바꾸고, 그 위에 플래토로 쓰는 BTSP 시냅스(일화적 장기 기록)를 둔다. 플래토는 KL[q(s) ‖ p(s)](새로움)와 보상·위험 사건에서. s를 기억에 넣어 상태 정보 이득을 식별 가능하게 한다. 진행 순서: M1-S-T(BTSP 없음) → 새로움 플래토 BTSP → 강화학습
+
+## 2026-11-13
+
+### BTSP로 구현한 DQN (`rltdp/btsp/replay.py`, `analyze_replay.py`)
+- Q-net = TDP 블록 θ (역전파) + 출력층 W (델타 규칙, 재생 중에 벨만 목표로 씀). 재현 = 에피소드 단위 해마 재생 (방금 에피소드는 역순)
+- v1 (지각 블록·목표망 없음): 델타·Adam 둘 다 실패. 델타는 φ가 거의 평행(코사인 0.79, 유효 차원 8)해서 β = 1 쓰기가 폭주 후 Q ≈ +4로 과대추정에 정착
+- v2 (TDP 앞에 같은 스텝 softmax 어텐션 + FFN 지각 블록, EMA 목표망, Double Q, 재생 일정은 그대로): 델타 1만 스텝 성공 0.94. 장 분석: Q 대 Q* 상관 0.94, 탐욕 정책이 무작위 배치 100개에서 최단 경로(6.10스텝). Adam 비교군은 사용자 요청으로 돌리지 않음
+- 결론: 기존 DQN 변형(NEC, LS-DQN, EBU 계열)을 넘는 기여가 없어 이 노선은 정리
+
+### 문맥 안 TD의 기억과 플래토 게이트 토이 연구 (`rltdp/icrl/toy.py`, `docs/icrl/icrl_memory_gate.md`)
+- 선형 어텐션 ICRL(Wang et al. 2025)의 계산은 문맥 전체가 아니라 LSTD 충분통계 (A, b)에만 의존. A = 같은 시각 외적 − γ·한 스텝 지연 외적 (STDP 꼴). 순환 기억 30개 실수가 창 11,000개의 바닥을 넘어 TD 고정점에 도달, 깊이는 시간에 나눌 수 있음 (iLSTD)
+- 비정상(보상 전환)에서는 망각 극점이 필요. 극점 하나 ≈ 같은 실효 길이의 창, 그러나 α를 고른 온라인 TD를 못 이김. 적응과 정확도가 다른 극점에서 나옴
+- 플래토 생 게이트는 해로움 (특이·발산, 관심 상태 오차 4~1,000배 이상 증가). 할인 속도로 감쇠하는 앞쪽 흔적(β = γ, emphatic TD의 follow-on)으로 거를 때만 관심 상태 오차 1.1~7.6배 감소
+- 실험 4 (`nonstat_gate`): 실험 3의 게이트를 비정상 흐름에. 공간 가중 그대로는 추적 지연을 못 고침. 시간 축 플래토 중 정밀도 가중 로그 우도비(문턱 = 사전 승산비 ln(1/h))로 터지고 긴 기억을 빠른 기억으로 덮어쓰는 쪽만 이득: 전체 0.360 (온라인 TD 0.395, 극점 100 0.446), 실제 변화 한 번당 플래토 0.9회, h 10⁻²~10⁻⁴에서 안정
+- B (`rltdp/icrl/arch.py`): 실험 4 (d)의 기억 규칙을 고정 구조로 두고 인코더만 사전학습 (비선형 관측, 단서 없는 보상 전환). 같은 구조의 대조군(빠른·긴 극점, 창, 망각 없음)을 모두 이김. Gated DeltaNet과는 전체 오차가 같고 (0.390 대 0.392) 강점이 반대 (gdn: 전환 직후, plateau: 정상 상태). 학습 파라미터 5,508 대 15,875. 시드 하나씩
+
+### 계열별 리팩토링, GPU 인수인계
+- 패키지 `fepoc` → `rltdp`. 계열별 하위 패키지: `rltdp/fep/` (자유에너지 PoC: bandit, flows, wm, agent, collect), `rltdp/btsp/`, `rltdp/icrl/`, 공통 `rltdp/common/` (minigrid_env, grid, tdp_block, replay_buffer). btsp·icrl은 fep에 의존하지 않는다
+- 테스트 `tests/common`, `tests/fep` (39개 통과, CPU). 스크립트 `scripts/<계열>/`, 문서 `docs/<계열>/`, 색인 `docs/README.md`, 인수인계 `docs/HANDOVER.md`
+- `rltdp/icrl/arch.py`: `--device` (GPU), `--ctx` (tf 문맥 길이), 결과 파일 이름에 시드. CPU 긴 학습은 GPU로 옮기기 위해 중단 (plateau 250반복 평가까지만)
+
+### 프로젝트 재정의: 요구별 모듈화 (`docs/ROADMAP.md`)
+- 목표: 마인크래프트에서 실시간으로 적응하는 에이전트. 추상화: 끝없이 변하는 흐름에서 고정 기억·고정 계산으로 저장한 것의 미래 쓸모를 최대화 (쓰기: 새로움 × 신뢰도 × 관련성, 유지·망각, 선택적 읽기)
+- 공통 지표: 회상 거리, 방해 불변성 (회상 거리 ∝ 1/ρ), 길이 불변성. 단계 R0~R8, 각 단계는 요구 하나 → 최소 형태 → 입증 → 단순화
+- 틀: 자유에너지원리·능동적 추론 (신뢰도·새로움·변화 = 기억 행렬의 칼만 필터의 σ², P, Q), 엔지니어링 참고: DreamerV3, 실시간 학습 계열
+
+### R1 과제 정의, 인수인계서 갱신
+- 쓰기 단계를 하나로 (R1: 새로움 × 신뢰도 × 관련성). 과제: 방해 (잡음 / 반복 / 무관한 새것)가 섞인 흐름형 연상 회상 (MQAR의 흐름판), R1-a (잡음·반복) → R1-b (무관한 새것). 단계는 R1~R5
+- `docs/HANDOVER.md`를 R1 구현·실험 기준으로 새로 씀. 루트 `README.md`, `docs/README.md` 갱신
+
+## 2026-11-14
+
+### R1 (`rltdp/memory/`, `docs/memory/r1_results.md`)
+- 흐름형 연상 회상: 값이 단서 없이 바뀌는 흐름에서만 키별 신뢰도 추정 (ours)이 토큰 게이트 (gdn, kdn)를 이긴다. 읽기를 보는 게이트 (gdn_read)도 전체 정확도는 같아진다. 시드 1개
+
+### 방향 결정: R1 → R3 (forage 월드), 사용자 결정
+- MQAR에서 성공한 형태 중 어느 것도 Craftax에서 돌아가는 형태로 그대로 옮길 수 없었다. 그래서 Craftax와 같은 꼴의 입력 (타일 패치 + 행동 + 보상)의 forage 월드에서 R3를 바로 한다
+- 설계가 여기서 성공하면 R4에서 달라지는 것은 난이도와 학습 규모뿐이다. `docs/HANDOVER.md` 0.1절
+
+### forage 월드와 TDP 에이전트 (`rltdp/world/`)
+- 에이전트 synapse / gru / tdp / random / oracle. TDP: RPE 덧셈 게이트는 중간에 회상을 배웠다가 무너짐, 델타 지움을 넣으면 안정적이지만 640반복까지 회상 못 함 (커밋 687674c 메시지, 수치 기록 없음)
+- TDP 스케일 안정화 (Codex): `docs/world/tdp_scale_stability.md`. iter 400에서 중단, found 0.242
+
+### forage 재실행 (`docs/world/README.md` 4절)
+- 이전 기록이 `runs/`에만 있어 사라져서 synapse·gru·tdp를 같은 설정으로 다시 돌림. 평가에 에피소드별 보상 횟수 분포 추가
+- synapse는 학습 전에도 30.4 (oracle 53.4). gru는 결정적 정책으로 탐색이 무너지며 이봉. tdp는 탐색은 유지, 기억 활용이 생겼다 사라짐, 최종 random 수준. 같은 시드의 이전 실행과 궤적이 크게 다름
+- 규칙: 결과는 `docs/<계열>/results/`로 복사해 커밋한다 (`HANDOVER.md` 1절)
+
+## 2026-11-15
+
+### 세계 과제 (`docs/world/README.md` 6–12절)
+- 갈림길: 학습된 키·월드 모델로 기억·원인 잇기 (8절), A → B → A 목표 적응 (9절). 세션 안 신용할당으로 처음 보는 보상에 경사 없이 적응, 고정 정책은 660만 스텝 뒤에도 회복 못 함 (11절)
+- 통합 시험 축소판 errand (12절, Codex 설계 `integrated_experiment_design.md`): b1 39–54%로 실패. Codex 진단 (`architecture_diagnosis.md`)·제안 (`architecture_proposal.md`, 재사용 F 키 학습)은 기준 미달 (12.4–12.5)
+- 진단 (12.6): 재사용 F를 도착 칸으로만 하면 학습이 키를 끔 (기억을 켤수록 손해). C는 b0에 쓰이지만 쓰는 순간 1/3만 들어가고 다음 스텝에 2/3가 지워짐 (이웃 흔적 코사인 0.97)
+- 척도 없음 + 주소 [흔적; 지금 키]: b1 76%, 다른 곳 0% (12.7). 세션 안 선호 (델타 규칙, 공개 의뢰)로는 28%, B·C 표현이 닮음
+- 임베딩 차원 키우기 효과 없음 (12.8). 쓰기 스케일을 표준형 경험적 베이즈로: 73% (12.9). 흔적 극 4개: 72% (12.10)
+- 시냅스 읽기를 월드 모델 입력으로: 쓰기까지 바꾼 실수로 18–28%, 월드 모델이 시냅스 내용을 무시 (12.11). 읽기 뒤 비선형 블록: 선형 읽기와 같은 내용 (재방문 80%), 선형 한계 기각 (12.12)
+- 칼만 과정 잡음 Q (칸별, 경험적 베이즈): **b1 84%**, b0 16% (12.13). 손 선호 판정, 시드 1
+
+## 2026-11-16
+
+### 다음 시험 결정: 곱하는 망각 (`docs/HANDOVER.md` 0.2절), 사용자 결정
+- 이유: 모방·오프라인 사전학습 흐름에서 기억이 시간 축 병렬로 학습돼야 한다. 더하는 과정 잡음 Q는 누적합이 아니고, 곱하는 망각 (H ← λH + zzᵀ/R, G ← λG + rzᵀ/R, M = G(H + I)⁻¹)은 누적합이다. 12.13 구성에서 Q 자리만 바꾸고, 12.13 분해 (q만 0)도 함께 기록
+- 정정: 12.13의 "Q가 256스텝에 더하는 P가 σ²과 비슷"은 단위 착오 (사전 P₀ = I, σ는 z 안). 사전 수준까지 약 1/q 스텝 (도착 칸 약 5.5만)
+- 후보로 기록 (결정 안 됨): 대역폭 여러 개 + 읽을 때 모형 평균, 세션 전용 저장소로의 공고화
+
+### 자유연구: 해마–신피질 공고화 (`docs/consolidation/README.md`)
+- 문헌: 시냅스 수준 (Benna & Fusi 2016, TagTriC), 시스템 수준 (Roxin & Fusi 2013, Káli & Dayan 2004, Go-CLS 2023, Spens & Burgess 2024), 다중 시간척도 칼만 (Kording 외 2007, Smith 외 2006), 강화학습 적용 (Kaplanis 2018/2019, Progress & Compress, EVA, Mattar & Daw)
+- 분석: 정확한 베이즈에서 재생은 정보를 더하지 않는다 (이중 계산). 재생이 정당한 경우는 느린 쪽의 근사, 표현 변화, 계산뿐
+- 토이 (`rltdp/consolidation/toy.py`, 사전 예측 `toy_predictions.md`): 잔차를 쓰는 순간 기준으로 굳히고 재생하면 이중 계산 폭주 (d = 128에서도 A 1.10). 현재 느린 모델 기준 잔차 (교차 통계, 누적합)는 합친 믿음을 지키고 빠른 몫을 0.47 → 0.12로 줄임. 용량을 넘은 빠른 쪽은 덮인 주소에서 확신 있게 틀려 합친 읽기를 망침. 용량 제한 시냅스에서의 믿음 재생은 무제한 날것 버퍼보다 훨씬 적게 옮김 (값 변화가 있어도). 예측 7개 중 4개 맞음
+
+### 다음 절차 결정 (`docs/HANDOVER.md` 0.3절), 사용자 결정
+- 1. 곱하는 망각 → 2. cr+replay (12.13 위에 세션 저장소와 잠, 더하는 Q에서는 값 확장으로 cr) → 3. 곱하는 망각 + cr+replay (교차 통계, 모두 누적합) → 4. 후속 특징 쪽 설계 고민 (층 셋, 정밀도까지 옮기기, 재생 입력, 넘친 시냅스, 순차 시험 위치)
+
+### 곱하는 망각 시험 (`docs/world/README.md` 12.15)
+- 12.13 구성에서 쓰기만 곱하는 망각 (정보형, λ_p 경험적 베이즈): **b1 65.6%** (RLS 73.4%, 더하는 Q 84.4%). 대체하지 않음
+- 12.13 분해 (σ², R 그대로 q = 0): 77.3%. 11점 중 σ² 재적합 약 4점, 과정 잡음 약 7점. 쓰인 몫은 σ² 몫 (0.34 → 0.48), Q는 거의 안 바꿈
+- 맞춘 창이 세계 칸 수십 스텝: 곱하는 망각은 잘 정해진 방향도 같은 비율로 잊음
+- 수치: 곱하는 망각은 P에 바닥이 없어 float32에서 P가 양정치를 잃음 (정보형·공분산형 모두 NaN). 제곱근 공분산형 (Potter 쓰기 + 촐레스키·Woodbury 감쇠)으로 해결. QR 기반 SRIF는 GPU에서 너무 느림
+
+### cr+replay (`docs/world/README.md` 12.16)
+- 12.13 위에 세션 저장소 (φ = unit(ReLU(W_φ x)), 1024)와 잠 (K = 64, n = 5, 세션 끝 한 번), 시냅스는 값 확장 cr (M_r, M_φ). 설계도 기본값 그대로
+- (i) 합친 기억 b1 85.2% (12.13 84.4%), (ii) 저장소만 68.8%, (iii-b) 시냅스 몫만 81.6%. 이중 계산 없이 옮겨짐. 시냅스 몫 0.21 → 0.09, 저장소 몫 0.03 → 0.16
+
+### 곱하는 망각 + cr+replay (`docs/world/README.md` 12.17)
+- 시냅스를 곱하는 망각 (1단계 값)으로 바꾸고 저장소·잠은 2단계 그대로: (i) 합친 기억 b1 70.7%, (ii) 저장소만 53.1%, 시냅스만 64.5%
+- 저장소가 곱하는 망각의 손해 약 20점 중 6점을 메움. 80%대 기준 미달. M_r z 읽기가 1단계 65.6%와 3세계 어긋남 (판정 정밀도 차이로 추정, 확인 안 함)
+
+### A → B → A 복귀 (`docs/world/aba_predictions.md`)
+- 한 세션 안에서 구역 A → 구역 B m개 → A. 시냅스만은 m = 32에서 2.60회 (기억 없음 3.0, m = 0에서 1.02)
+- 저장소 (12.16 그대로)를 더해도 2.30 (저장소만 2.24). 사전 기준 미달. 옮기기는 됐으나 저장소도 B에 덮임 (m = 0 저장소만 1.20 → m = 32 2.24)
+- 진단 (m = 32): 용량 상한 (ridge, 세션 전체 한 번에) 저장소만 1.32회, 날것 재생 (raw) 1.38회 대 belief 재생 2.24회. 원인은 용량이 아니라 빈 재생 (cr이 시냅스를 비운 뒤 잠이 A에 대해 줄 목표가 없음)
+
+### σ(x): 기억 몫의 사전 분산을 주소의 함수로 (`docs/world/sigma_x_predictions.md`)
+- 영감: BTSP (고원 전위는 드물고 한 번에 큼). 칸별 상수 σ를 주소 x의 작은 망 σ(x)로, 경험적 베이즈로 맞춤
+- 1차는 최적점에 못 닿음 (상수 σ를 포함하는 족인데 증거가 더 나쁨). 2차 (12.13에서 출발, lr 0.005, 600반복): 증거 12.13보다 약 105만 좋음, 도착 순간 σ² 33배 (희소한 쓰기), 그러나 b1 30%
+- 맞춘 기억은 "주소마다 마지막 쓰기가 이김" (도착 순간 0.98 쓰고 q 45배로 빨리 잊음). 가설: 학습 자료에 오래된 사실이 그대로인 재방문이 없음. 사용자 평가: 별로, 보류
+- σ(x)는 결국 신경망이 쓰기·읽기 배율을 내는 것이고, "작게 쓰는 근거"를 증거 최대화와 학습 자료에 맡긴 것이었다 (사용자 지적)
+
+## 2026-11-17
+
+### 방향과 명세 (`docs/HANDOVER.md` 0절, 사용자 결정)
+- 별도 저장소는 두지 않음 (빠른 것 = 시냅스, 오래 가는 것 = 느린 가중치). 시냅스는 망 안의 선형 어텐션식 kv 외적 누적이어야 함 (지금 M은 고정 난수 키의 바깥 조회표)
+- 과거 실패 (5절 tdp, 12.11, 12.6, 12.1–12.5) 재검토: 모두 모델·조건이 달라 지금 설계에 대한 증거가 아님
+- 명세 1 `docs/world/synapse_layer_spec_basic.md` (기본형: 12.13에서 키 경로만 학습, 증거 목적), 명세 2 `docs/world/synapse_layer_spec_mult.md` (곱하는 망각판, 누적합 꼴). 순서 명세 1 → 2
+
+exec
+/bin/bash -lc "nl -ba docs/HANDOVER.md | sed -n '1,84p'" in /workspace/RL-TDP
+ succeeded in 0ms:
+     1	# 인수인계서
+     2	
+     3	## 0. 한눈에
+     4	
+     5	- **목표**: 마인크래프트에서 실시간으로 적응하는 에이전트. 실질 도달점은 DreamerV3의 마인크래프트 다이아몬드 설정에서 같은 조건으로 DreamerV3를 넘는 것이다.
+     6	- **핵심 가설**: 기억이 새롭고, 믿을 만하고, 관련 있는 입력만 쓰고 (쓰기), 증거가 있을 때만 버리고 (망각), 필요한 것만 읽으면 (읽기), 같은 크기의 기억이 사건 단위로 훨씬 먼 과거까지 쓸모 있게 된다.
+     7	- **틀**: 자유에너지원리와 능동적 추론 (쓰기 = 정밀도 가중 믿음 갱신, 기억 행렬에 대한 칼만 필터). 엔지니어링 뼈대와 비교군은 DreamerV3.
+     8	- **단계**: R1 쓰기 → R2 유지·망각 → R3 읽기 → R4 월드 모델 결합 (Crafter / Craftax) → R5 마인크래프트. 상세는 [`ROADMAP.md`](ROADMAP.md).
+     9	- **지금 할 일 (2026-11-14 갱신)**: R1은 끝났고 (결과: [`memory/r1_results.md`](memory/r1_results.md)), **R2를 건너뛰고 R3를 forage 월드 (`rltdp/world/`)에서 바로 한다** (0.1절).
+    10	  4절의 R1 계획은 기록으로 남긴다. 현재 작업은 [`world/README.md`](world/README.md).
+    11	- **현재 상태 (2026-11-15)**: 작은 과제에서 요구별로 확인 (갈림길 8–9절, 세션 안 신용할당 11절). 통합 시험 축소판 (지연 채집 errand, `world/README.md` 12절)에서, 손 선호 판정 (요구 3 제외)으로 **b1 84%** (12.13): 주소 [지금 키; 흔적], 칸별 칼만 쓰기 (사전 분산 σ², 관측 잡음 R, **과정 잡음 Q**)를 모두 경험적 베이즈 (학습 세계의 주변 우도)로 맞춤, 손 값 없음. Q가 없으면 (RLS) 73%: 바뀐 b0의 B, B, C를 평균 냄. 기각된 것: 임베딩 차원 (12.8), 흔적 극 늘리기 (12.10), 시냅스 읽기 뒤 비선형 블록 (12.12, 선형 읽기가 이미 재방문 80%), 시냅스 읽기를 월드 모델 입력으로 (12.11, 쓰기까지 바꾼 설계 실수로 해석 불가). 세션 안 선호 (요구 3)는 b1 28%로 미해결.
+    12	- **2026-11-16 결과 요약 (상세는 아래 절차 1–3.5, `world/README.md` 12.15–12.17, `world/aba_predictions.md`, `world/sigma_x_predictions.md`)**:
+    13	  - 곱하는 망각 단독 b1 66% (RLS 73%, 더하는 Q 84%). 곱하는 망각은 P에 바닥이 없어 float32에서 제곱근형 (Potter) 구현이 필요.
+    14	  - cr+replay (더하는 Q 위): 합친 기억 85%, 저장소만 69%. **이중 계산 없이 옮겨진다.** 곱하는 망각 위에서는 71% (80%대 미달).
+    15	  - A → B → A (한 세션 안 구역 전환): 시냅스만은 B 구역 8개부터 무너져 32개에서 첫 보상까지 2.60회 (기억 없음 3.0). belief 재생 저장소는 2.24회.
+    16	    **원인은 용량이 아니라 교사 소실**: 같은 저장소에 세션 전체를 한 번에 맞추면 1.32회, 잠의 목표를 날것 관측으로 바꾸면 1.38회. belief 재생의 교사 (시냅스)가 B에 덮여 A의 목표를 잃는다.
+    17	  - σ(x) (기억 몫의 사전 분산을 주소의 함수로, 경험적 베이즈): 쓰기는 희소해지고 증거도 크게 좋아졌지만 b1 30%. 맞춘 기억이 "주소마다 마지막 쓰기가 이김". 사용자 평가: 별로 (보류). 가설 (확인 안 함): 학습 자료에 "오래된 사실이 그대로인 재방문"이 없어 증거 최대화가 최근 것만 믿게 만든다.
+    18	  - 다음 방향은 정하지 않음. 후보: 날것 재생 (값 변화 b0 B → C에서 옛 값을 되살리는지 먼저), TEM식 구조 주소, 절차 4 (후속 특징).
+    19	- **방향 (2026-11-17, 사용자 결정)**:
+    20	  - **별도 저장소는 두지 않는다.** 빠른 것은 시냅스, 오래 가는 것은 느린 가중치. 세션 저장소 (12.16–12.17, A → B → A)는 메커니즘 확인으로만 남긴다 (무작위 특징 위 저장소는 신피질이 아니라 더 큰 두 번째 해마였다).
+    21	  - **시냅스는 망 안의 선형 어텐션식 kv 외적 누적이어야 한다.** 지금의 M은 쓰기 꼴만 그렇고, 키가 고정 난수라 망 바깥의 조회표다. 키·흔적을 망의 표현에서 학습된 사영으로 만든다. GRU 같은 별도 순환 상태는 두지 않는다 (순환 상태 = 시냅스).
+    22	  - 무작위 키는 원리가 아니라 남은 흔적: 학습된 키가 무작위를 못 이긴 12.1–12.5는 모두 쓰기 결함 (12.6–12.13에서 고침) 이전이고, 고친 쓰기 위에서는 재지 않았다. 5절 tdp, 12.11, 12.6의 실패도 모델·조건이 달라 지금 설계에 대한 증거가 아니다. 옮겨지는 것은 인과적 짝짓기, 잔차 값, 칼만 이득 + Q, P와 시간 병렬의 충돌 (수식)뿐.
+    23	  - **다음 시험: 명세 1 → 명세 2.** [`world/synapse_layer_spec_basic.md`](world/synapse_layer_spec_basic.md) (기본형, 더하는 Q, 12.13에서 키 경로만 학습), [`world/synapse_layer_spec_mult.md`](world/synapse_layer_spec_mult.md) (곱하는 망각판, 누적합 꼴). 절차 4 (후속 특징)는 그 뒤. 공고화는 느린 경로로 옮기기 (같은 층의 느린 선형 경로 W_s에 M W_q를 더하고 M에서 덜어 냄, 국소, 역전파 없음)로 나중에 다룬다.
+    24	- **공고화 조사 (2026-11-16)**: 문헌과 토이 [`consolidation/README.md`](consolidation/README.md). 빠른 시냅스를 "현재 느린 모델에 대한 잔차" (cr)로 유지하고 잠에서 믿음을 세션 저장소로 옮기면 (replay), 이중 계산 없이 옮겨지고 시냅스가 빈다. 쓰는 순간의 잔차를 굳히면 폭주한다.
+    25	- **다음 절차 (2026-11-16 결정, 순서대로, 한 번에 하나씩)**:
+    26	  1. **곱하는 망각**: 12.13의 더하는 Q를 곱하는 망각으로 (0.2절). 이유는 사전학습 (모방·오프라인)에서의 시간 축 병렬 학습.
+    27	     **결과 (2026-11-16)**: b1 65.6%, RLS (73.4%)보다도 낮아 대체하지 않음. 12.13 분해 (σ², R 그대로 q = 0): 77.3%, 즉 73 → 84%의 11점 중 σ² 재적합 약 4점, 과정 잡음 약 7점. 맞춘 창: 세계 칸 23–74스텝, 도착 칸 190스텝. 곱하는 망각은 P에 바닥이 없어 float32에서 제곱근형 (Potter) 구현이 필요했다. 상세 [`world/README.md`](world/README.md) 12.15.
+    28	     → 3은 그대로 한다 (사용자, 2026-11-16): 병렬화가 중요하므로, 곱하는 망각이 단독으로 손해여도 cr+replay를 더해 80%대가 나오면 충분히 고려할 만하다.
+    29	  2. **cr+replay**: 12.13 구성 (더하는 Q) 위에 세션 저장소와 잠을 더한다 (0.3절).
+    30	     **결과 (2026-11-16)**: (i) 합친 기억 b1 85.2% (12.13 84.4%, 이중 계산 없음), (ii) 저장소만 68.8% (b0 31%), (iii-b) 시냅스 몫만 81.6%. 도착 칸 시냅스 몫 0.21 → 0.09, 저장소 몫 0.03 → 0.16. 저장소 없는 별도 실행 (iii-a)은 생략 (사용자). 상세 [`world/README.md`](world/README.md) 12.16.
+    31	  3. **곱하는 망각 + cr+replay**: 1과 2를 합친다. 모두 누적합 꼴이 된다 (0.3절).
+    32	     **결과 (2026-11-16)**: (i) 합친 기억 b1 70.7% (시냅스만 64.5%보다 6점 높음), (ii) 저장소만 53.1%, (iii-b) 시냅스 몫만 58.2%. 80%대 기준에 못 미침 (더하는 Q + cr+replay 85.2%). (i)–(ii) 차이가 2단계보다 작다는 예상은 틀림 (17.6 대 16.4점). λ, σ², R은 저장소 없이 맞춘 값 (다시 맞추지 않음). 상세 [`world/README.md`](world/README.md) 12.17.
+    33	  3.5 **A → B → A 복귀 (사용자, 2026-11-16)**: 한 세션 안에서 구역 A → 서로 다른 구역 B m개 → A, 손 선호로 첫 보상까지 시도 수. 설계·예측·결과 [`world/aba_predictions.md`](world/aba_predictions.md).
+    34	     **결과**: 시냅스만은 m = 8부터 무너져 m = 32에서 2.60회 (기억 없음 3.0). 저장소 (12.16 그대로)를 더하면 합친 기억 2.30, 저장소만 2.24. 사전 기준 (0.5회 이상 개선) 미달.
+    35	     옮기기는 됐지만 (시냅스 몫 0.008) 저장소도 B에 덮였다 (m = 0에서 저장소만 1.20 → m = 32에서 2.24). 원인 후보는 저장소 용량 (따로 재지 않음).
+    36	     **진단**: 용량이 아니라 빈 재생. 같은 φ 1024에 세션 전체를 한 번에 맞추면 (ridge) 저장소만 1.32회, 잠의 목표만 날것 관측으로 바꾸면 (raw) 1.38회. belief 재생의 교사는 시냅스인데, B가 시냅스를 넘쳐 A를 덮으면 저장소가 흔들려도 바로잡을 목표가 없다 (cr의 이동 자체는 교사를 비우지 않는다: M_t = M_r − S M_φ가 지금 S 기준이라, 시냅스가 A를 기억하는 한 흔들린 만큼 다시 커진다). 날것 재생의 교사는 세션 전체를 담은 버퍼라 이 한계가 없다 (대신 메모리가 세션 길이에 비례). 남은 질문: 날것 재생이 바뀐 값 (b0 B → C)에서 옛 값을 되살리는가.
+    37	  4. **후속 특징 쪽 설계 고민**: 1–3의 결과를 받아 `world/sf_architecture.md`를 고친다. 구현 전에 사용자 검토 (0.3절).
+    38	- 이전 결정 (2026-11-15, 4에서 다시 정함): 시냅스를 **후속 특징**으로 바꾼다 ([`world/sf_architecture.md`](world/sf_architecture.md)). Ψ = Ψ⁰ + M z를 칼만 시간차 학습 (P, R, Q 경험적 베이즈)으로 쓰고, 선호 u도 세션 안 칼만, 행동은 u·Ψ + 정보 획득. 시험 순서: (1) 쓰기 목표만 γ > 0으로 (같은 판정, 84% 유지 확인), (2) 세션 안 선호 (요구 3), (3) 판정 구간 자율 행동, (4) 관찰도 자율. 그 전에 12.13 구성을 시드 여러 개로 확인.
+    39	  미룬 것: 시냅스 읽기를 월드 모델 입력에 넣기 (쓰기는 그대로, 입력 하나만), 키 학습.
+    40	- **정밀도 정의**: 칼만 필터의 P (기억 내용 불확실성), R (관측 잡음), Q (과정 잡음)와 그로 정해지는 이득만 정밀도라고 부른다. 입력 척도 같은 것을 새로 만들지 않는다 (12.13 끝).
+    41	- **규칙 (사용자)**: 실험 전에 설계 근거와 바뀌는 것을 따지고, 한 번에 하나만 바꾼다. Codex는 이론만, 구현·실험은 Claude. Codex 프롬프트는 사용자 검수 뒤 전송. 시드 1개. 손으로 만든 장치 금지, 시험은 바꾸지 않음. 백그라운드 실행은 띄운 뒤 살아 있는지 확인하고, 동시에 여러 개 띄우지 않음 (호스트 RAM 30GB에서 OOM).
+    42	
+    43	### 0.1 R1 → R3로 바로 넘어간 이유 (사용자 결정, 2026-11-14)
+    44	
+    45	- R1 (MQAR 흐름판)에서 결과는 나왔지만, Craftax에서 돌아가는 형태로 넣으려 하니 MQAR에서 성공한 형태 중 어느 것도 그대로 옮길 수 없었다.
+    46	- 그래서 Craftax와 같은 꼴의 입력 (타일 단위 이미지 패치 + 행동 + 보상, 행동 4개, 에피소드마다 바뀌는 배치)을 쓰는 작은 과제 (forage 월드)에서 R3를 바로 한다.
+    47	- 모델 설계가 여기서 성공하면 R4 (Craftax)에서 달라지는 것은 실질적으로 **난이도와 학습 규모뿐**이다. 이것이 이 순서의 이점이다.
+    48	- 따라서 forage 월드의 설계 판단 기준은 "Craftax로 그대로 옮길 수 있는 형태인가"다.
+    49	
+    50	### 0.2 곱하는 망각을 먼저 하는 이유와 시험 명세 (사용자 결정, 2026-11-16)
+    51	
+    52	**이유: 사전학습에서의 병렬 학습**
+    53	- DreamerV3는 RSSM (GRU)을 64스텝 조각으로 순차 역전파한다. 순차 칼만 쓰기는 DreamerV3 대비 불리하지 않다.
+    54	- 문제는 요즘 흐름이다: 대량 모방·오프라인 사전학습 뒤 실제 환경에서 짧은 파인튜닝 (VPT, Dreamer 4). 기억을 낀 채 긴 궤적을 대량으로 학습하려면 시간 축 병렬이 돼야 한다.
+    55	  이 흐름에서 이 연구의 자리는 "짧은 파인튜닝을 세션 안 가소성으로 대신"이다. 후속 특징의 Ψ는 보상 없이 정의되어 모방 데이터로 사전학습할 수 있고, 세션 안에서는 u만 보상으로 배운다.
+    56	- **병렬이 되는 것**: 쓰기 이득이 주소 z에만 의존하고 M에 선형인 쓰기. 델타, RLS, 망각 계수 RLS, 후속 특징의 TD 쓰기 (부트스트랩이 있어도 M에 선형, LSTD 누적합). 칼만 + 일정 Q는 리카티 재귀가 z에만 의존해 결합 스캔은 되지만 조합마다 d³.
+    57	- **깨지는 것**: 쓰기·망각 세기가 기억 자신의 예측 오차에 의존하는 것. R1 ours (읽기 오차로 키별 잡음 추정), gdn_read, 증거 망각의 χ, 온라인 위험률.
+    58	  선형 가우시안 모델에서 칼만 이득은 관측값과 무관하다. 내용이 끼어드는 것은 변화의 증거 ("내가 기억한 것과 어긋남")와 세션 안에서 추정해야 하는 신뢰도뿐이다. 느린 월드 모델의 놀라움으로는 대신할 수 없다 (b0의 C는 첫 방문의 C와 같은 놀라움).
+    59	- 더하는 Q (P ← P + qI)는 정보형에서 선형 누적합이 아니다. 곱하는 망각은 누적합 두 개 (MesaNet과 같은 꼴)라 청크 병렬이 된다.
+    60	  이것이 84%를 지키면 쓰기와 시간 망각은 사전학습과 양립하고, 남는 병렬화 문제는 증거 망각 하나로 좁혀진다 (후보: 청크 시작 시점의 기억 기준으로 증거를 재는 TTT 층식 지연, 또는 게이트 없는 아래 단계 기억들의 오차로 증거를 만드는 단계형).
+    61	
+    62	**명세**
+    63	- 출발: 12.13 구성 그대로 (`scripts/world/diag_20261115/eb_scale.py`의 `QN=1` 자리). 난수 키, 주소 [k; e], 키 128, 손 선호 판정, 시드 1, 세계 256개.
+    64	- 바꾸는 것: `write()`의 칸별 갱신 하나. 정보형으로
+    65	  - H ← λ_p H + z zᵀ / R_p, G ← λ_p G + r zᵀ / R_p, M = G (H + I)⁻¹. z = σ_p [e; k]는 그대로, 사전 M ~ N(0, I)는 감쇠하지 않는다.
+    66	  - 주변 우도용 예측은 감쇠 뒤·쓰기 전 상태로: 평균 M z, 분산 R_p + zᵀ (H + I)⁻¹ z.
+    67	  - λ_p는 q_p 자리에 칸별 하나, σ_p², R_p와 함께 같은 경험적 베이즈로 맞춘다.
+    68	  - 구현은 지금처럼 순차 scan으로 둔다. 이 시험은 형태가 되는지 보는 것이지 속도가 아니다.
+    69	- 쓰지 않는 판: 사전까지 감쇠시키는 공분산 팽창 (P ← P / λ). 관측 안 된 방향의 P가 끝없이 커진다 (windup).
+    70	- 비교: RLS (Q = 0) 73.4%, 더하는 Q 84.4% (12.9, 12.13).
+    71	- 함께 기록: 맞춘 λ_p와 유효 창 1/(1 − λ_p), 도착 순간 쓰인 몫, 그리고 **12.13 분해** (12.13에서 맞춘 σ², R은 그대로 두고 q만 0으로 한 판정).
+    72	  12.13에서는 Q를 넣으면서 도착 칸 σ²도 0.0005 → 0.0039로 같이 바뀌어, 73 → 84%가 과정 잡음 덕인지 σ² 재적합 덕인지 갈리지 않았다.
+    73	- 읽기: 84% 근처면 곱하는 망각으로 대체한다. RLS 쪽에 가까우면 더하는 Q의 무엇이 필요했는지 본다.
+    74	  더하는 Q는 P가 작은 (잘 정해진) 방향일수록 상대적으로 크게 불확실해지고, 곱하는 망각은 데이터가 정한 방향을 모두 같은 비율로 키운다.
+    75	- 12.13 기록의 단위 정정: "256스텝 동안 늘어나는 P (≈ 0.0046)가 사전 분산 σ² (0.0039)과 비슷"은 틀렸다. 코드에서 사전은 P₀ = I이고 σ는 z 안에 있다.
+    76	  Q가 256스텝에 더하는 0.0046은 사전의 0.46%이고, 사전 수준까지는 약 1/q 스텝 (도착 칸 약 5.5만, 도장 칸 약 1.4만, 지도 칸 20만–50만) 걸린다. 쓴 방향의 사후 P에 비해 얼마나 큰지는 재지 않았다.
+    77	
+    78	**그 뒤 후보 (사용자 제안, 결정 안 됨)**: 긴 세션의 기억 한계를 다루는 두 방법.
+    79	- **대역폭 여러 개**: λ가 다른 시냅스 여러 개 (가장 긴 것은 수만 스텝). 각 시냅스는 게이트 없는 누적합이라 병렬이다.
+    80	  어느 대역을 믿을지는 읽을 때 각 대역의 순차 예측 우도로 정한다 (베이즈 모형 평균). 이 가중치는 쓰기로 되돌아가지 않으므로 증거를 쓰면서도 병렬이다 (위의 단계형 후보와 같은 꼴).
+    81	  한계: 긴 대역은 그동안의 모든 쓰기를 담아 선형 용량 (키 차원)에 걸린다 (R1 결과 5절, 키 64개에서 "확실한데 틀린" 읽기 7.6%). 흔적 극 늘리기 (12.10)는 주소 쪽 시간척도라 이것과 다른 축이다.
+    82	- **공고화**: 일정 간격으로 빠른 시냅스의 내용을 더 크고 느린 저장소로 옮긴다 (상보적 학습계의 해마 → 신피질).
+    83	  옮길 곳은 세계 공통인 느린 가중치가 아니라 세션 (세계) 전용 저장소여야 한다. 세계마다 다른 사실 ("b1에서 B")을 공통 가중치에 쓰면 다른 세계를 오염시키고, 이는 시험 때 가중치를 파인튜닝하는 것과 같다.
+    84	  무엇을 옮길지는 칼만 상태가 정한다 (사후 P가 작은 = 믿을 만한 내용). 용량 문제를 직접 다루는 쪽은 이것이다. **→ 다음 절차 2–3으로 채택 (0.3절).**
+
+exec
+/bin/bash -lc "nl -ba docs/world/README.md | sed -n '365,590p'" in /workspace/RL-TDP
+ succeeded in 0ms:
+   365	| | b1 (정답) | b0 (옛 자리) | 다른 곳 | 안 감 |
+   366	|---|---|---|---|---|
+   367	| random | 2.7% | 7.0% | 15.2% | 75% |
+   368	| value (TD, 흔적 크기 정규화) | 0.8% | 2.7% | 3.5% | 93% |
+   369	| fact (후속 특징 + 보상 가중치) | 3.1% | 1.2% | 7.8% | 88% |
+   370	
+   371	교사 구간 보상은 모두 5 (A 4 + B 1, 변경 증거 0) = 환경 정상.
+   372	진단 (기억 내용과 길 찾기를 분리, 각 채집처 자리에서 상호작용의 Q를 기억에서 직접 읽음): **b1이 최대인 비율 value 15.6%, fact 15.2% (우연 20%)**. 기억에 "b1에서 하면 B가 온다"가 들어 있지 않다. 길 찾기 이전에 기억 내용이 없다.
+   373	value는 정규화 없이 Q가 10⁶ 단위로 발산 (키에 HUD 3칸이 들어가 스텝끼리 키가 닮음) → 흔적 크기로 정규화해 다시 잼.
+   374	
+   375	읽기: 고정 난수 키, 학습 없는 시냅스로는 이 과제의 신용할당 (상호작용 8스텝 뒤, 걸어가는 도중 도착하는 결과를 출발 행동에 잇기)이 되지 않는다. 결과가 올 때 흔적의 대부분은 돌아오는 길의 키이고 (γλ = 0.72, 8스텝 전 상호작용의 몫 약 0.07), HUD 칸이 모든 키에 공통으로 들어가 키끼리 겹친다. 갈림길 과제에서 원인 구별을 푼 것은 학습된 키였다 (8절). 이 과제도 학습된 키 (+ 시야 이동처럼 예측 가능한 것을 맡는 월드 모델)가 필요하다.
+   376	
+   377	### 12.1 학습된 월드 모델·키 위의 예측 쓰기, 기억 내용 판정 (`rltdp/world/errand_learned.py`)
+   378	
+   379	판정을 나눴다: 교사 구간 끝의 기억을 복제해 채집처마다 "가서 하고 돌아오기"를 시뮬레이션 (쓰지 않음), 산출물 도착을 예측하는 순간 HUD 도착 칸의 B 점수가 최대인 곳이 b1인가. 자율 길 찾기는 이번 판정에서 뺐다.
+   380	쓰기 = 흔적 위의 정밀도 가중 예측 쓰기 (12절의 후속 특징이 아님). 느린 학습: 월드 모델 (다음 관측 특징의 평균·분산, 음의 로그우도), 키 (SwiGLU, 시냅스가 월드 모델 잔차를 예측한 오차, 64스텝 조각). 자료는 다른 세계 512개의 교사 세션. 세계 256개, 시드 0. 기록 `results/errand_learned_20261115.json`.
+   381	
+   382	| | b1 (정답) | b0 (바뀐 옛 자리) | 다른 곳 |
+   383	|---|---|---|---|
+   384	| 고정 난수 키, 월드 모델 없음 | 36% | 53% | 11% |
+   385	| 고정 난수 키 + 월드 모델 | 41% | 39% | 19% |
+   386	| 학습된 키 + 월드 모델 | 44% | 38% | 18% |
+   387	| (위 셋 + 증거 망각) | 같음 | 같음 | 같음 |
+   388	
+   389	- 예측 쓰기는 "b0과 b1에서 B가 나온다"를 담는다 (다른 곳 11–19%). 12절의 실패 (우연 수준)는 쓰기 규칙 탓이 컸다.
+   390	- 남은 실패는 거의 b0을 아직 B로 기억하는 것 (b1과 b0이 거의 반반). 요구 4 (증거로만 고치기)가 걸리는 지점.
+   391	- 7절의 증거 망각 (두 가설 우도비, 온라인 위험률, q₀ = 1)을 붙여도 결과가 같다: 변화 감지가 켜지지 않는다. 의심되는 원인: 도착 순간의 흔적이 돌아오는 길의 키로 채워져 있어 "그대로" 가설의 예측이 애초에 B를 강하게 말하지 않는다 (그래서 C 도착이 놀랍지 않다). q₀ = 1과 내용 분산의 척도 불일치 (7절)도 겹칠 수 있다. 확인 전.
+   392	- 학습된 월드 모델·키의 이득은 작다 (b1 36 → 44%).
+   393	
+   394	### 12.2 키 정규화 해제와 손실의 머리별 척도
+   395	
+   396	- 12.1의 학습된 키는 단위 크기로 정규화되어 있어 인코더가 키 크기로 흔적을 조절할 수 없었다 (8절에서 문제를 푼 장치를 막아 둔 구현 실수). 정규화를 풀어도 결과는 거의 같다 (b1 44%, b0 41%). 학습된 키 크기: **상호작용 0.39, 이동 1.60, 대기 0.65** — 필요한 것과 반대.
+   397	- 원인 (추정): 키 학습 손실 (다음 관측 예측 오차, 96성분 합)의 대부분이 이동 때 새로 보이는 칸 (지도)이다. 지도를 맞히려면 흔적이 지금 이동 키를 크게 담아야 하고, 상호작용 키를 키우면 그 뒤 8스텝 동안 흔적을 차지해 지도 예측이 나빠진다.
+   398	- 손실을 머리별 척도 (세계 시야 9칸 평균 + HUD 3칸 평균, 같은 무게)로 바꿈: b1 46%, b0 34%, 다른 곳 19% (증거 망각과 함께: 35 / 41 / 24%). 키 크기는 상호작용 0.40, 이동 1.47로 거의 그대로. 기록 `results/errand_learned_20261115_heads.json`.
+   399	- 머리별 평균이 효과가 작은 이유: 드문 것은 칸 수가 아니라 **시간**이다. 산출물 도착은 510스텝 중 11번 (약 2%). 칸끼리 무게를 맞춰도 사건의 빈도는 그대로다.
+   400	
+   401	### 12.3 칸별 정밀도 (`rltdp/world/errand_prec.py`)
+   402	
+   403	월드 모델이 칸별 평균·분산을 예측하고 (칸별 음의 로그우도), 시냅스는 칸마다 정밀도 가중 쓰기 (회귀 입력 s_p e, 칸별 P), 키 학습 손실은 모형의 예측 분포 아래 칸별 음의 로그우도 (σ²_p = R + zᵀP_p z). 기록 `results/errand_prec_20261115_evidence.json`.
+   404	
+   405	| | b1 | b0 (옛 자리) | 다른 곳 |
+   406	|---|---|---|---|
+   407	| 난수 키 | 54% | 46% | **0%** |
+   408	| 학습된 키 | 47% | 53% | **0%** |
+   409	| 난수 키 + 칸별 증거 망각 | 35% | 49% | 16% |
+   410	| 학습된 키 + 칸별 증거 망각 | 43% | 43% | 15% |
+   411	
+   412	- 칸별 정밀도로 "B가 나오는 곳 = b0, b1"이 정확히 저장된다 (다른 곳 0%). 줄어들 수 없는 오차의 무게가 낮아진 효과.
+   413	- 학습된 키 크기: 상호작용 0.22, 이동 1.73, 대기 0.23 — 여전히 상호작용이 작다. 월드 모델 칸별 분산: 세계 칸 0.011–0.030, HUD 칸 0.0003–0.002.
+   414	- 칸별 증거 망각 ("바뀜" 분산 = 월드 모델의 그 칸 분산, 칸별 위험률 온라인)을 붙이면 b0은 그대로 남고 다른 곳이 15–16%로 오염된다. 변화의 증거 (C 도착)가 b0의 상호작용이 아니라 도착 순간의 흔적 (상호작용 키가 작아 돌아오는 길이 대부분)에 붙어, 그 길을 쓰는 다른 사실을 고친다. 12.1의 증거 망각 실패와 같은 원인으로 보인다.
+   415	
+   416	### 12.4 Codex 진단 (`architecture_diagnosis.md`)이 확인한 결함 세 개만 고침
+   417	
+   418	새 장치 없이: (1) C 도착 뒤로는 M, P에 쓰지 않음 (끝의 대기 패딩 쓰기 제거), (2) 주소를 시야 9칸 + 행동으로만 (HUD 제외, b1을 쓸 때와 읽을 때 카드가 달랐다), (3) 동점은 무작위 (동점 수 기록). 칸별 정밀도 판, 증거 망각 없음. 기록 `results/errand_prec_20261115_fixes.json`.
+   419	
+   420	| | b1 | b0 (옛 자리) | 다른 곳 | 동점 |
+   421	|---|---|---|---|---|
+   422	| 난수 키 | 45% | 55% | 0.4% | 0 |
+   423	| 학습된 키 | 39% | 61% | 0% | 0 |
+   424	
+   425	결함을 고쳐도 b0 고집은 그대로 (오히려 약간 늘었다). 세 결함은 이 실패의 원인이 아니었다. 남은 후보는 Codex가 짚은 두 가지: 지연 귀속 (도착한 결과가 원인 주소가 아닌 그 순간 흔적에 묶임)과 정적 회귀의 평균화 (b0은 B 2번, C 1번).
+   426	
+   427	### 12.5 Codex 제안 (`architecture_proposal.md`): 키를 "재사용 F"로 학습 (`rltdp/world/errand_reuse.py`)
+   428	
+   429	결합 (월드 모델, 학습된 키, 흔적, 칸별 정밀도 가중 쓰기)과 판정은 12.4 그대로. 바꾼 것은 키 학습 목적 하나: 교사 경험으로 C 도착까지 쓰고, 그 기억을 고정한 채 채집처 5곳을 판정 형식 경로로 다시 질의해, 경로 관측의 칸별 정밀도 가중 음의 로그우도를 줄인다. 경사는 첫 쓰기부터 재질의까지 끊지 않음 (스텝별 재계산). 시드 1, 학습 세계 256 / 시험 세계 256 분리. 기록 `results/errand_reuse_20261115.json`.
+   430	
+   431	| 판정에 쓴 기억 | b1 | b0 (옛 자리) | 다른 곳 |
+   432	|---|---|---|---|
+   433	| C 쓰기 직전 | 33.6% | 64.5% | 2.0% |
+   434	| C 쓰기 직후 | 35.5% | 63.7% | 0.8% |
+   435	
+   436	C 쓰기 하나가 바꾼 B 점수 (코사인, 시험 세계 평균): b0 −0.010, b1 +0.008, 나머지 +0.007.
+   437	
+   438	- Codex가 미리 정한 기준 (b1이 39.45%보다 올라야 함)에 못 미친다. 12.4의 학습된 키 (b1 39%)보다 낮다.
+   439	- C 도착 증거가 b0의 읽기를 거의 바꾸지 못한다 (−0.010, 다른 곳 변화와 같은 크기). 결과가 원인 주소 (b0에서의 상호작용)로 옮겨 가지 않는다는 12.4의 후보 (지연 귀속)가 그대로 남았다.
+   440	- 재사용 F 손실 자체는 줄었다 (−129 → −179). 손실이 주로 줄인 것은 경로 관측 (지도) 예측으로 보이며, 드문 C 사건의 귀속은 이 목적에서 거의 무게가 없다. (추정, 따로 확인하지 않음)
+   441	- 제안 규칙대로 별도 장치는 덧붙이지 않았다.
+   442	
+   443	### 12.6 진단: b0 고집의 원인은 지연 귀속이 아니라 쓰기 크기와 이웃 주소 (`scripts/world/diag_20261115/`)
+   444	
+   445	12.5 뒤, 장치를 넣지 않고 재기만 함. 시드 1. 12.4의 칸별 정밀도 시냅스, 주로 난수 키.
+   446	
+   447	**키 학습 목적 (12.5 설정)**. 학습된 키의 행동별 크기: 초기 0.29–0.38 (상호작용 0.38) → 재사용 F 전 칸 0.35–0.53 (상호작용 0.46, 이동보다 작음) → 재사용 F를 도착 칸으로만: 전부 0.05–0.07 (b1 23%). 학습 전 키를 c배 했을 때 도착 칸 F: c = 0 (기억 끔) −17.51, c = 1 −17.17, c = 3 −16.95. **도착 예측만 보면 시냅스를 켤수록 손해라 학습이 키를 끈다.** 전 칸 F에서 기억이 이득인 것은 지도 칸 덕분. 기록 `results/errand_reuse_diag_{all,slot}.json`.
+   448	
+   449	**C는 어디에 쓰였나** (시냅스 읽기만 A·B·C·빈칸 특징으로 분해, 잔차 0.11–0.13):
+   450	
+   451	| | b0의 B 몫 | b0의 C 몫 | b1의 B 몫 |
+   452	|---|---|---|---|
+   453	| C 쓰기 전 | 0.09 | −0.01 | 0.06 |
+   454	| C 쓰기 후 | 0.08 | 0.04 | 0.06 |
+   455	
+   456	C는 b0에만 들어가고 b1은 그대로 — **지연 귀속은 된다.** b0의 B가 거의 지워지지 않아 b0 B 점수가 b1보다 높다. 시냅스 읽기 크기 0.06–0.09 (월드 모델 평균 0.48).
+   457	
+   458	**왜 읽기가 작은가** (첫 B 도착 스텝의 주소로, 그 뒤 k스텝 쓰기를 더 한 기억에서 다시 읽은 B 오차 몫, 세계 32개):
+   459	
+   460	| k | 0 | 1 | 2 | 5 | 11 |
+   461	|---|---|---|---|---|---|
+   462	| 남은 몫 | 0.33 | 0.12 | 0.11 | 0.10 | 0.09 |
+   463	
+   464	- 쓰는 순간에도 1/3만 들어간다: 도착 칸의 회귀 입력 z = s e에서 s = √(v_HUD / v̄)가 작다 (HUD 칸 월드 모델 분산 0.0003–0.002, v̄ ≈ 0.03). 도착은 드물어 평균 분산이 작지만, 도착 순간의 오차는 크다.
+   465	- 바로 다음 스텝 쓰기가 2/3를 지운다: 이웃 스텝 흔적 코사인 0.971. 다음 스텝은 빈칸 (r ≈ 0)인데 주소가 거의 같아, 회귀가 "여기서는 B가 아니었다"로 고친다.
+   466	- 같은 이유로 C 쓰기도 b0을 거의 못 바꾼다. 12.3의 증거 망각을 12.4 수정 위에서 다시 켜도 그대로 (b1 43%, b0 52%).
+   467	
+   468	**세션 안 선호 (델타 규칙 u ← u + β(r − u·y) y/|y|²)**, 판정의 손 선호 (B 방향) 대신:
+   469	
+   470	| | b1 | b0 | 다른 곳 | 배운 선호 A / B / C |
+   471	|---|---|---|---|---|
+   472	| 손 선호 (12.4) | 45% | 53% | 2% | — |
+   473	| 비공개 의뢰, 도착 특징 | 4% | 14% | 82% | 0.93 / 0.41 / 0.11 |
+   474	| 공개 의뢰 (`errand.PUBLIC`), 도착 × 카드 | 28% | 53% | 19% | −0.01 / 0.36 / 0.23 |
+   475	
+   476	비공개 의뢰에서는 "B 의뢰 중 A는 보상 0"을 겪을 기회가 교사 경로에 없어 A 선호가 남는다 (규칙이 아니라 경험에 정보가 없음). 공개 의뢰면 같은 규칙이 B로 옮겨 간다. C 선호가 남는 것은 고정 8차원 임베딩에서 B·C 코사인 0.79.
+   477	
+   478	읽기: 실패의 자리는 (1) 쓰기 크기 (정밀도 척도 s가 사건이 아니라 칸의 평균 분산을 따름)와 (2) 한 극 흔적이 이웃 스텝을 거의 같은 주소로 만드는 것. 지연 귀속 (C를 b0에 잇기)과 세션 안 선호 학습 (공개 의뢰)은 이미 된다.
+   479	
+   480	### 12.7 두 원인을 끈 진단 (`scripts/world/diag_20261115/variants.py`)
+   481	
+   482	12.6의 두 원인만 바꿔 같은 판정 (난수 키, 칸별 정밀도 시냅스, C 도착 뒤 쓰기 없음, 시드 1, 세계 256개). "s = 1": 회귀 입력의 정밀도 척도 s = √(v/v̄)를 1로. "주소 [e; k]": 회귀 입력 = 흔적과 지금 키를 이어 붙임 (이웃 스텝이 같은 주소가 되지 않게).
+   483	
+   484	| 척도 s | 주소 | b1 | b0 | 다른 곳 | 도착 순간 쓰인 몫 |
+   485	|---|---|---|---|---|---|
+   486	| 월드 모델 분산 (12.4) | e | 45% | 53% | 2% | 0.23 |
+   487	| 도착 칸만 1 | e | 64% | 36% | 0% | 0.41 |
+   488	| 월드 모델 분산 | [e; k] | 52% | 48% | 0% | 0.33 |
+   489	| 도착 칸만 1 | [e; k] | 78.5% | 21.5% | 0% | 0.53 |
+   490	| **모든 칸 1 (척도 없음)** | **[e; k]** | **75.8%** | **24.2%** | **0%** | 0.53 |
+   491	
+   492	- 정밀도 척도를 아예 빼고 주소에 지금 키를 붙이면 b1 76% (Codex 기준: 39.45% 초과 필요, 80% 이상이면 유용). 손으로 고른 칸 없이.
+   493	- 공개 의뢰 (`errand.PUBLIC`)에서도 손 선호로 77.7%.
+   494	- **세션 안 선호 (도착 × 카드 델타 규칙)로 판정하면 b1 28%, b0 61%, 다른 곳 11%.** 배운 선호 C 0.23 / B 0.36이 남아 (고정 8차원 임베딩에서 B·C 코사인 0.79), B와 C를 함께 기억한 b0의 예상 보상이 b1보다 크다. 다음 병목은 표현 (산출물 구별).
+   495	
+   496	### 12.8 표현: 임베딩 차원 (효과 없음)
+   497	
+   498	`ERRAND_H` 환경변수로 픽셀 임베딩 차원을 바꿀 수 있게 함 (기본 8). B·C 코사인: H = 8 0.75, 32 0.46, 64 0.50. 12.7 구성 (척도 없음, 주소 [e; k], 공개 의뢰), `variants.py 0 1 1 1`. 기록 `results/errand_diag_20261115b/embed_dim.log`.
+   499	
+   500	| H | 손 선호 b1 | 세션 안 선호 b1 / b0 / 다른 곳 |
+   501	|---|---|---|
+   502	| 8 | 78.9% | 28.1 / 60.9 / 10.9% |
+   503	| 32 | 57.8% | 31.6 / 46.9 / 21.5% |
+   504	| 64 | 호스트 메모리 부족으로 중단 | |
+   505	
+   506	차원을 키워도 세션 안 선호 판정은 오르지 않고 손 선호 판정은 떨어진다.
+   507	
+   508	여기서 판정의 뜻을 다시 정리함 (사용자와 논의): 비공개 의뢰의 세션 안 선호는 요구 3 (새 보상 적응)을 재고, 손 선호 판정은 요구 3을 빼고 기억·원인 잇기·증거 수정만 잰다. 아래 12.9–12.13은 모두 손 선호 판정 (요구 3 제외).
+   509	
+   510	### 12.9 쓰기 스케일을 표준형으로 (경험적 베이즈) (`scripts/world/diag_20261115/eb_scale.py`)
+   511	
+   512	12.7까지의 척도 s = √(v_p / v̄)와 고정 R = 0.01은 단위가 맞지 않았다 (v̄는 모든 칸의 최대, HUD 칸 분산 0.0003–0.002 < R). 표준형 (베이즈 선형 회귀): 칸 p마다 y_p − μ⁰_p = M_p z + ε, z = σ_p [e; k], ε ~ N(0, R_p). σ_p², R_p를 학습 세계 256개 교사 세션의 순차 예측 우도 (= 주변 우도)로 맞춤. 판정은 12.7과 같음 (난수 키, 시드 1, 시험 세계 256개). 기록 `results/errand_diag_20261115b/eb_scale.log`.
+   513	
+   514	| 쓰기 스케일 | b1 | b0 | 다른 곳 | 도착 순간 쓰인 몫 |
+   515	|---|---|---|---|---|
+   516	| s = √(v/v̄), R = 0.01 (12.7의 [e; k] 판) | 52% | 48% | 0% | 0.33 |
+   517	| s = 1, R = 0.01 (12.7) | 75.8% | 24.2% | 0% | 0.53 |
+   518	| 칸별 상수 σ_p², R_p | 73.4% | 26.6% | 0% | 0.34 |
+   519	| σ_p² = c_p × 월드 모델 분산 | 43.8% | 56.2% | 0% | 0.18 |
+   520	
+   521	맞춘 값: 지도 칸 σ² ≈ 0.05, R ≈ 0.00003. 도착 칸 σ² 0.0005, R 0.0009 (도착 칸에서 기억 몫보다 잡음이 크다고 맞춰짐). 표준형은 손 값 없이 s = 1과 비슷하다. 기억 없는 월드 모델의 분산을 곱하면 나빠진다.
+   522	
+   523	### 12.10 키 쪽 흔적 극 늘리기 (효과 없음)
+   524	
+   525	주소를 극 여러 개의 흔적으로 (반감기 0 = 지금 키, 2, 4, 8스텝). 12.9 칸별 상수판, 키 64차원. 기록 `results/errand_diag_20261115b/eb_poles.log`.
+   526	
+   527	| 극 | b1 | b0 | 다른 곳 | 쓰인 몫 | 도착 칸 R |
+   528	|---|---|---|---|---|---|
+   529	| {0, 8} | 71.9% | 28.1% | 0% | 0.34 | 0.00093 |
+   530	| {0, 2, 4, 8} | 71.5% | 28.1% | 0.4% | 0.42 | 0.00086 |
+   531	
+   532	시점을 짚는 능력 (몇 스텝째에 도착하나)은 병목이 아니었다. 사용자가 실행 전에 이득이 작을 것이라고 예상함.
+   533	
+   534	### 12.11 시냅스 읽기를 월드 모델 입력으로 (실패, 설계 실수) (`scripts/world/diag_20261115/wm_mem.py`)
+   535	
+   536	DreamerV3의 GRU 상태 자리에 시냅스 읽기를 넣으려 함: 월드 모델 (o, a, m, 흔적) → 칸별 평균·분산, 세션 전체 역전파로 학습. 그런데 입력만 바꾸지 않고 쓰기도 함께 바꿨다 (목표 = 다음 장면 그대로, 쓰기 크기 = 기억을 본 월드 모델 분산 × 칸별 상수). 시드 1, 학습률·정규화를 바꿔 세 번. 기록 `results/errand_diag_20261115b/wm_mem_*.log`.
+   537	
+   538	| 판 | b1 | b0 | 다른 곳 | 도착 칸 분산 (도착 / 빈칸 스텝) |
+   539	|---|---|---|---|---|
+   540	| 학습률 1e-4, 800회 | 28% | 29% | 43% | 0.0018 / 0.0007 |
+   541	| RMS 정규화 (12칸 한꺼번에) + 1e-3 | 22% | 12% | 66% | 0.0058 / 0.0009 |
+   542	| RMS 정규화 (칸별) + 1e-3 | 18% | 17% | 65% | 0.0086 / 0.0013 |
+   543	| (같은 판, 시냅스 읽기 0) | 22% | 22% | 56% | |
+   544	
+   545	- 월드 모델은 흔적으로 도착 시점을 배웠다 (도착 스텝 분산이 빈칸의 7배).
+   546	- 하지만 시냅스 내용은 쓰지 않았다: 교사 세션 안 도착 산출물 맞힘 (처음 5번 40%, 재방문 67%)이 시냅스 읽기를 0으로 해도 똑같다. 흔적만 보고 "대개 A"로 맞힘.
+   547	- 원인 (실험 뒤 정리): (1) 쓰기 목표를 잔차에서 관측 그대로로 바꿔 6.2의 교훈 (빠른 기억은 느린 모델 잔차만)을 어김, (2) 쓰기 크기를 기억을 본 월드 모델의 분산에서 가져와 기억이 아는 것일수록 덜 씀 (바뀐 순간에도), (3) 월드 모델이 기억을 무시해도 손실이 주는 길이 있음. 요청은 입력 하나였는데 쓰기까지 바꿔 해석할 수 없게 된 실수.
+   548	
+   549	### 12.12 시냅스 읽기 뒤 블록 (잔차 + 사후 정규화): 선형 읽기 한계는 원인이 아님 (`scripts/world/diag_20261115/mlp_read.py`)
+   550	
+   551	쓰기는 12.9 칸별 상수판 그대로. 읽기만: h = RMSNorm(W_in[o, a] + W_m m), h = RMSNorm(h + MLP(h)), ŷ = μ⁰ + W_μ h (머리 0에서 시작). 쓰기가 블록에 의존하지 않아 (o, a, m, y)로 지도 학습. 학습 세계 32개를 검증용으로 떼어 검증 손실 최저 시점 선택 (500회; 4000회까지 돌리면 검증 손실이 −323 → +3170으로 과적합). 기록 `results/errand_diag_20261115b/mlp_read.log`.
+   552	
+   553	시험 세계 교사 세션, 도착 칸:
+   554	
+   555	| | 선형 (μ⁰ + M z) | 블록 |
+   556	|---|---|---|
+   557	| 산출물 맞힘: 처음 5번 | 40% | 40% |
+   558	| 산출물 맞힘: 재방문 | 80% | 80% |
+   559	| 음의 로그우도: 도착 / 빈칸 스텝 | 108.9 / −26.0 | 101.3 / −33.3 |
+   560	| 판정 b1 / b0 / 다른 곳 | 74.2 / 25.8 / 0% | 31.2 / 23.8 / 44.9% |
+   561	
+   562	비선형 읽기가 내용을 더 꺼내지 못한다. 12.9에서 도착 칸 R이 크게 잡힌 것은 처음 보는 산출물 (어떤 기억으로도 못 맞힘)과 도착 스텝의 분산 맞춤 때문으로 보인다. 남은 b0 오답은 읽기가 아니라 쓰기 (B, B, C의 평균화) 쪽.
+   563	
+   564	### 12.13 과정 잡음 Q: b1 84% (`eb_scale.py`, `QN=1`)
+   565	
+   566	RLS는 상태가 안 바뀐다고 가정 (P가 줄기만 해 같은 주소를 평균 냄). 칼만 필터의 과정 잡음을 넣음: 매 스텝 칸마다 P ← P + q_p I, q_p를 σ_p², R_p와 함께 같은 경험적 베이즈로 맞춤. 나머지는 12.9 칸별 상수판 그대로 (주소 [k; e], 키 128). 기록 `results/errand_diag_20261115b/eb_process_noise.log`.
+   567	
+   568	| 쓰기 | b1 | b0 | 다른 곳 | 도착 순간 쓰인 몫 |
+   569	|---|---|---|---|---|
+   570	| RLS (Q = 0, 12.9) | 73.4% | 26.6% | 0% | 0.34 |
+   571	| **칼만 + 과정 잡음 (칸별 q_p 맞춤)** | **84.4%** | **15.6%** | **0%** | **0.49** |
+   572	
+   573	- 맞춘 q: 지도 칸 0.000002–0.000005, 도착 칸 0.000018, 도장 칸 0.00007. 데이터가 "바뀐다"를 고름 (q가 0으로 가지 않음).
+   574	- 도착 칸에서 보존 256스텝 동안 늘어나는 P (≈ 0.0046)가 사전 분산 σ² (0.0039)과 비슷: 오래된 내용은 수백 스텝 뒤 처음 보는 것만큼 불확실해져 C가 오면 크게 고쳐진다.
+   575	  **정정 (2026-11-16)**: 단위 착오. 코드에서 사전은 P₀ = I이고 σ는 회귀 입력 z 안에 있다. 0.0046은 사전의 0.46%이고, 사전 수준까지는 약 1/q 스텝 (도착 칸 약 5.5만) 걸린다. 쓴 방향의 사후 P와의 비교는 재지 않았다. 또 Q와 함께 도착 칸 σ²도 바뀌어 84%의 원인이 갈리지 않았다 (`../HANDOVER.md` 0.2절의 분해).
+   576	- 도착 칸 σ²도 0.0005 → 0.0039로 커짐 (Q가 없으면 한 번 쓴 것을 영원히 믿어야 해서 작게 맞춰졌던 것으로 보임).
+   577	- Codex 기준 (80% 이상 유용)을 처음 넘음. 손으로 정한 값 없음. 단서: 시드 1, 손 선호 판정 (요구 3 제외).
+   578	
+   579	정밀도의 정의 (사용자 지적): 오늘 "정밀도"를 척도 s, RLS의 P, 칸별 σ²·R, 월드 모델 분산 네 가지에 섞어 씀. 표준 정의 (칼만)에 맞는 것은 P (기억 내용의 사후 불확실성)와 R (관측 잡음), 그리고 과정 잡음 Q이고, 쓰기 크기는 이들로 정해지는 칼만 이득 하나다. 척도 s와 월드 모델 분산으로 입력을 조절한 것은 그 밖이었다.
+   580	
+   581	### 12.14 다음: 후속 특징 시냅스 (제안, [`sf_architecture.md`](sf_architecture.md))
+   582	
+   583	지금 시냅스는 γ = 0인 후속 특징 (다음 관측만 예측)이고 행동 경로가 없다. 다음은 쓰기 목표를 φ(o′) + γΨ′로 넓히고 (칼만 시간차 학습), 가치를 u·Ψ로 읽어 행동을 고르는 것. 시험은 γ만 바꾸는 것부터 하나씩.
+   584	
+   585	### 12.15 곱하는 망각: b1 66%, 더하는 Q를 대신하지 못함 (`eb_scale.py`, `FORGET=mult`), 2026-11-16
+   586	
+   587	명세 `../HANDOVER.md` 0.2절. 12.13 구성에서 `write()`의 칸별 갱신 하나만 정보형 곱하는 망각으로: H ← λ_p H + zzᵀ/R_p, G ← λ_p G + r zᵀ/R_p, M = G (H + I)⁻¹, 사전 N(0, I)는 감쇠 안 함, 예측은 감쇠 뒤·쓰기 전. λ_p를 q_p 자리에 σ_p², R_p와 함께 같은 경험적 베이즈로 맞춤 (초기 1 − λ = 1e-3, λ = sigmoid). 시드 1, 세계 256개. 기록 `results/errand_diag_20261116/`.
+   588	
+   589	| 쓰기 | b1 | b0 | 다른 곳 | 도착 순간 쓰인 몫 | 기록 |
+   590	|---|---|---|---|---|---|
+
+exec
+/bin/bash -lc 'nl -ba docs/world/synapse_layer_spec_basic.md && nl -ba docs/world/synapse_layer_spec_mult.md' in /workspace/RL-TDP
+exec
+/bin/bash -lc "nl -ba docs/world/README.md | sed -n '130,365p'" in /workspace/RL-TDP
+ succeeded in 0ms:
+     1	# 시냅스 층 기본형: 명세 (더하는 과정 잡음), 2026-11-17
+     2	
+     3	짝 문서: 곱하는 망각판 [`synapse_layer_spec_mult.md`](synapse_layer_spec_mult.md). 배경: `../HANDOVER.md` 0절 (2026-11-17 방향).
+     4	
+     5	## 0. 목적과 바뀌는 것
+     6	
+     7	- **목적:** 바깥에 붙은 무작위 키 조회표를, 망의 표현에서 학습된 사영으로 키를 만드는 kv 외적 누적 시냅스로 바꾼다. 쓰기 규칙을 고친 뒤 (12.7–12.13)의 조건에서 학습된 키가 무엇을 하는지 잰다.
+     8	- **12.13에 비해 바뀌는 것:** 키 경로 하나. 무작위 키가 학습되는 키 사영과 학습되는 흔적 극으로 바뀐다.
+     9	- **그대로인 것:** 느린 월드 모델 μ⁰ (학습된 것, 고정), 칸별 칼만 쓰기 (σ_p, R_p, q_p), 값 = 잔차, 손 선호 판정, 시드 1.
+    10	- 초기값은 12.13의 무작위 키와 같다.
+    11	
+    12	## 1. 구성
+    13	
+    14	| 부품 | 식 | 상태 |
+    15	|---|---|---|
+    16	| 시야 표현 | w_t = feat(o_t)[0:9] (시야 9칸 × 8 = 72차원. HUD는 넣지 않음, 12.4) | 고정 임베딩 (12.13과 같음) |
+    17	| 표현 변환 | u_t = w_t + MLP(w_t), MLP 72 → 128 (SiLU) → 72, 마지막 층 0으로 초기화 | 학습. 초기에는 u = w |
+    18	| 키 (결정 시점의 상황 × 행동) | k̂_t = W_k[a_t] u_t, W_k[a] ∈ R^{128×72} (행동별), 초기값 = 12.13의 Wr[a] | 학습 |
+    19	| 키 크기 | k_t = exp(ℓ_t) · k̂_t / ‖k̂_t‖, ℓ_t = 선형([w_t; onehot(a_t)]), 초기값 0 | 학습. 초기에는 단위 크기 (= 12.13) |
+    20	| 인과적 시간 창 (흔적) | e_t = α e_{t−1} + k_t, α = sigmoid(θ_α), 초기 2^(−1/8) (반감기 8) | 학습 |
+    21	| 주소 = 질의 | x_t = [k_t; e_t] ∈ R²⁵⁶, 칸별 회귀 입력 z_p = σ_p x_t | |
+    22	| 값 (쓰기 목표) | r_p = feat(o_{t+1})_p − μ⁰_p(o_t, a_t) (느린 모델이 못 맞힌 몫) | |
+    23	| 시냅스 | 칸별 M_p ∈ R^{8×256}, P_p ∈ R^{256×256}, 세션 시작에 M = 0, P = I | 세션 안 쓰기만 (역전파 없음) |
+    24	| 칼만 매개변수 | σ_p, R_p, q_p (칸별, 36개), 초기값 = 12.13에서 맞춘 값 | 학습 (경험적 베이즈) |
+    25	
+    26	질의를 주소와 묶는 이유: 칼만 회귀에서 다음 잔차의 사후 예측은 M z이고 분산은 R + zᵀPz다. 별도의 질의 사영을 두면 이 예측 의미가 깨지고, 학습 목적 (주변 우도)도 정의되지 않는다.
+    27	
+    28	## 2. 한 스텝 (세션 안, 칸 p마다)
+    29	
+    30	1. k_t, e_t, x_t, z_p를 위 식대로 계산한다.
+    31	2. 예측 (쓰기 전): 잔차 평균 M_p z_p, 분산 S_p = R_p + z_pᵀ P_p z_p. 다음 장면 예측은 μ⁰_p + M_p z_p.
+    32	3. 과정 잡음: P_p ← P_p + q_p I
+    33	4. 칼만 쓰기: g = P_p z_p / S_p, M_p ← M_p + (r_p − M_p z_p) gᵀ, P_p ← P_p − (P_p z_p)(P_p z_p)ᵀ / S_p
+    34	5. C 도착 뒤에는 쓰지 않는다 (stop_t, 12.13과 같음).
+    35	
+    36	순서와 수치는 `scripts/world/diag_20261115/eb_scale.py`의 `write()` 그대로이고, 바뀌는 것은 1의 키 계산뿐이다. M은 시간에 걸친 (잔차 ⊗ 주소) 외적의 누적이고, 칼만 이득이 주소들 사이 상관을 풀어 준다 (델타 규칙과 Gated DeltaNet의 일반형).
+    37	
+    38	## 3. 학습 (느린 가중치, 여러 세계, 역전파)
+    39	
+    40	- **목적:** 학습 세계 교사 세션의 순차 예측 음의 로그우도.
+    41	  - Σ_t Σ_p ½ [ ‖r_p − M_p z_p‖² / S_p + H log S_p ]
+    42	  - 12.13 경험적 베이즈의 목적과 같은 식이다. 이 선형 가우시안 기억 모형의 음의 로그 증거, 즉 정확한 자유에너지다.
+    43	  - 기울기는 칼만 재귀 (M, P)를 거쳐 키 매개변수와 σ, R, q로 흐른다. 세션 전체를 역전파하고, 스텝마다 `jax.checkpoint` (12.13과 같음).
+    44	- **학습되는 것:** MLP, W_k, ℓ, θ_α, σ_p, R_p, q_p. μ⁰ (월드 모델)와 픽셀 임베딩은 고정.
+    45	- **자료:** 학습 세계 1,024개 (시드 50,000–51,023), 검증 세계 128개 (51,024–51,151), 판정 세계 256개 (1,000–1,255, 12.13과 같음). 모두 같은 교사 경로.
+    46	- **최적화:** Adam. 키 경로 lr 1e-3, 칼만 매개변수 lr 0.05 (12.13과 같음). 배치는 세션 8개.
+    47	  - 100반복마다 검증 NLL을 재고, 가장 낮은 시점을 쓴다.
+    48	  - 최대 2,000반복. 검증 NLL이 500반복 동안 나아지지 않으면 멈춘다.
+    49	
+    50	## 4. 판정과 기록
+    51	
+    52	- **판정:** 12.13과 같은 손 선호 판정. 끝 기억을 고정한 채 채집처마다 경로를 흉내 내고, 도착 칸에서 cos(M z, g_B)로 b1 / b0 / 다른 곳을 센다. 흉내 낸 경로에서도 키와 흔적을 같은 학습된 식으로 계산한다.
+    53	- **기록:**
+    54	  - 학습 전과 학습 뒤의 b1 / b0 / 다른 곳
+    55	  - 검증 NLL 곡선
+    56	  - 맞춘 α (반감기)와 σ_p, R_p, q_p
+    57	  - 도착 순간 쓰인 몫
+    58	  - 행동 종류별 키 크기 exp(ℓ) 평균: 상호작용 / 이동 / 대기 (12.2, 8절과 비교)
+    59	  - 이웃 스텝 주소 코사인 (12.6에서 0.97이 문제였음)
+    60	
+    61	## 5. 비용
+    62	
+    63	- 세션 안 계산은 12.13과 같다. 칸마다 P가 256 × 256이고, 키 경로는 스텝당 작은 MLP 하나가 더해진다.
+    64	- 학습 반복 하나는 12.13 경험적 베이즈 한 반복 (세션 8개 역전파)에 키 경로 기울기를 더한 것. 12.13은 200반복, 여기서는 최대 2,000반복.
+    65	- 순차 scan. 더하는 Q는 누적합 꼴이 아니라 시간 병렬이 안 된다 (명세 2에서 다룸).
+    66	
+    67	## 6. 범위 밖
+    68	
+    69	- 월드 모델 μ⁰ 함께 학습
+    70	- 시냅스 읽기를 뒤 층의 입력으로 넣기
+    71	- 곱하는 망각 (명세 2)
+    72	- 공고화 (느린 경로로 옮기기)
+    73	- 후속 특징, 증거 망각
+     1	# 시냅스 층, 곱하는 망각판: 명세 (명세 2), 2026-11-17
+     2	
+     3	짝 문서: 기본형 [`synapse_layer_spec_basic.md`](synapse_layer_spec_basic.md) (명세 1). 여기에는 명세 1과 다른 곳만 적는다. 진행 순서는 명세 1 → 명세 2 (읽기 기준 일부가 명세 1 결과에 기댄다).
+     4	
+     5	## 0. 목적과 바뀌는 것
+     6	
+     7	- **목적:** 시냅스 층을 시간 축으로 병렬 학습할 수 있는 꼴 (누적합)로 만든다. 모방·오프라인 사전학습으로 긴 궤적을 대량 학습하려면 필요하다 (`../HANDOVER.md` 0.2절).
+     8	  12.15에서 무작위 키로는 곱하는 망각 단독이 65.6% (더하는 Q 84.4%)였다. 학습된 키 위에서 다시 잰다.
+     9	- **명세 1에 비해 바뀌는 것:** 쓰기 하나. 더하는 과정 잡음 (P ← P + qI)이 곱하는 망각으로 바뀐다.
+    10	- **그대로인 것:** 키 경로 (시야 표현, 표현 변환, 행동별 W_k, 키 크기 ℓ, 학습되는 흔적 극 α), 주소 = 질의, 값 = 잔차, 학습 목적·자료·최적화, 판정.
+    11	- **초기값에서 12.15와 정확히 같아지도록** 둔다. 키 경로는 12.13의 무작위 키, 칼만 매개변수는 12.15에서 맞춘 값.
+    12	
+    13	## 1. 구성 (명세 1과 다른 줄만)
+    14	
+    15	| 부품 | 식 | 상태 |
+    16	|---|---|---|
+    17	| 시냅스 상태 (칸별, 정보형) | H_p ∈ R^{256×256}, G_p ∈ R^{8×256}. 세션 시작에 H = 0, G = 0. 사전 M ~ N(0, I)는 감쇠하지 않음 | 세션 안 쓰기만 |
+    18	| 읽기 | M_p = G_p (H_p + I)⁻¹, 잔차 예측 M_p z_p | |
+    19	| 칼만 매개변수 | λ_p = sigmoid(θ_p), σ_p, R_p (칸별, 36개). 초기값 = 12.15에서 맞춘 값 (`results/errand_diag_20261116/mult_forget.log` 마지막 줄). q_p는 없음 | 학습 (경험적 베이즈) |
+    20	
+    21	## 2. 한 스텝 (세션 안, 칸 p마다)
+    22	
+    23	1. k_t, e_t, x_t, z_p = σ_p x_t (명세 1과 같음)
+    24	2. 감쇠: H_p ← λ_p H_p, G_p ← λ_p G_p
+    25	3. 예측 (감쇠 뒤, 쓰기 전): 잔차 평균 M_p z_p, 분산 S_p = R_p + z_pᵀ (H_p + I)⁻¹ z_p
+    26	4. 쓰기: H_p ← H_p + z_p z_pᵀ / R_p, G_p ← G_p + r_p z_pᵀ / R_p
+    27	5. C 도착 뒤에는 쓰지 않음 (stop_t)
+    28	
+    29	**누적합 꼴:** H_t = Σ_j λ^{t−j} z_j z_jᵀ / R, G_t = Σ_j λ^{t−j} r_j z_jᵀ / R. 주소 z_j는 기억 내용과 무관하다 (키 경로만의 함수). 그래서 학습 때 조각 안을 시간 병렬로 계산할 수 있다 (MesaNet과 같은 꼴). 읽을 때는 스텝마다 (H_t + I)를 풀어야 한다.
+    30	
+    31	## 3. 수치 구현 (12.15 그대로, 필수)
+    32	
+    33	- 곱하는 망각은 P에 바닥이 없다. 같은 방향에 계속 쓰면 분산이 약 (1 − λ)R / |z|²로 내려가 float32에서 P가 양정치를 잃는다. 12.15에서 정보형·공분산형 모두 반복 100에서 NaN.
+    34	- 제곱근 공분산형 (`scripts/world/diag_20261115/eb_scale.py`의 `mult_step`). P = (H + I)⁻¹ = S Sᵀ로 두고 M과 S를 들고 간다.
+    35	  - **감쇠:** C = λI + (1 − λ) SᵀS를 촐레스키 분해 (C = LLᵀ). M ← M − (1 − λ) M S C⁻¹ Sᵀ, S ← S L⁻ᵀ.
+    36	  - **쓰기 (Potter):** f = Sᵀz, α = 1 / (R + |f|²), γ = 1 / (1 + √(αR)), K = α S f. M ← M + (r − M z) Kᵀ, S ← S − γ K fᵀ.
+    37	  - **예측 분산:** R + |Sᵀz|² (구조상 양수).
+    38	- 행렬곱 정밀도 `highest`를 쓰기와 **판정 경로 모두**에 둔다. 12.17에서 판정 경로 정밀도가 달라 12.15와 3세계 (65.6% 대 64.5%) 어긋났다.
+    39	- 병렬 꼴 (누적합 + 스텝별 풀이)은 이번 시험에서 구현하지 않는다. 이 시험은 형태가 되는지 보는 것이고 속도가 아니다.
+    40	  - 선택 확인: 세션 하나에서 float64 누적합 꼴과 순차 구현의 예측이 같은지 (상대오차 1e-5 이하).
+    41	
+    42	## 4. 학습 (명세 1과 같음, 다른 점만)
+    43	
+    44	- **목적:** 순차 예측 음의 로그우도. S_p는 2의 3 (감쇠 뒤 분산).
+    45	- **학습되는 것:** 키 경로 전부 + θ_p, σ_p, R_p.
+    46	- 자료, 배치, lr (키 경로 1e-3, 칼만 매개변수 0.05), 검증 기반 조기 종료는 명세 1과 같다.
+    47	- **비용:** 칸마다 스텝당 256 × 256 촐레스키 하나와 삼각 풀이. 12.15에서 세션 8개 배치에 반복당 2.7초. 최대 2,000반복이면 약 1.5시간.
+    48	
+    49	## 5. 판정과 기록
+    50	
+    51	명세 1과 같다. 더 기록할 것:
+    52	- 맞춘 λ_p와 창 1/(1 − λ_p). 12.15와 비교 (세계 칸 23–74스텝, 도착 칸 190스텝).
+    53	- 키 크기와 창의 관계.
+    54	
+    55	## 6. 사전 예측과 읽기 기준 (실행 전에 고정)
+    56	
+    57	| | 예측 / 기준 |
+    58	|---|---|
+    59	| 학습 전 | b1 = 12.15 값 (`highest` 정밀도로 다시 잰 값, 64.5–65.6%). 검증 NLL = 12.15 매개변수의 값. 다르면 멈추고 고침 |
+    60	| 학습 뒤, 증거 | 검증 NLL이 학습 전보다 낮다 |
+    61	| 학습 뒤, 학습 이득의 크기 (방향만) | 명세 1보다 크다 |
+    62	| 채택 기준 (사용자, 2026-11-16) | b1 80%대면 병렬형으로 충분히 고려 |
+    63	
+    64	"학습 이득이 명세 1보다 크다"의 근거: 곱하는 망각에서 한 번 쓸 때 들어가는 정보는 |k|² / R에 비례하고, 정상 상태 정밀도는 |k|² / (R(1 − λ))에 비례한다. 그래서 학습된 키 크기가 드물지만 중요한 스텝 (상호작용)에서 망각을 보상할 수 있다. 더하는 Q에는 이 경로가 약하다.
+    65	
+    66	읽기:
+    67	- **80% 이상:** 시냅스 층을 병렬형으로 둘 수 있다. 이후 단계 (공고화, 후속 특징)를 이 꼴로 진행.
+    68	- **명세 1과 ±3점 안 (명세 1이 80% 미만이어도):** 망각 형태는 병목이 아니다. 병렬형을 택한다.
+    69	- **명세 1보다 3점 넘게 낮고 80% 미만:** 곱하는 망각이 잘 정해진 방향까지 같은 비율로 잊는 손해 (12.15)를 키 학습이 메우지 못한 것. 병렬화는 다른 길 (더하는 Q의 결합 스캔 d³, 또는 청크 지연)로 남긴다.
+    70	- **증거는 좋아졌는데 b1이 학습 전보다 3점 넘게 떨어짐:** 명세 1과 같이 읽는다 (증거 목적과 판정의 어긋남).
+    71	
+    72	## 7. 범위 밖과 단서
+    73	
+    74	- 범위 밖은 명세 1과 같다.
+    75	- 곱하는 망각은 고정된 선형 가우시안 동역학이 없다 (암묵적 과정 잡음이 믿음 P에 의존). 학습 목적은 생성모형의 증거가 아니라 이 순차 예측 절차의 예측 우도다 (12.15의 자유에너지 관점 단서). 명세 1의 목적은 정확한 증거다.
+
+ succeeded in 0ms:
+   130	| iter 160 이후 rewards ≥ 20 (세 시드) | 시드 2의 iter 160이 17.8. 그 뒤 31.7 | 한 번 미달 |
+   131	| 최종 rewards ≥ 30 | 22.1 | 틀림 |
+   132	| 최종 lap ≤ 15 | 10.8 | 맞음 |
+   133	| 실패 기준: iter 160 이후 rewards < 5 | 없음 | 걸리지 않음 |
+   134	
+   135	읽기:
+   136	- 세 성질을 갖추자 tdp의 "활용이 생겼다 사라짐" (random 수준으로 떨어짐)은 사라졌다. 22~31 사이에서 유지된다.
+   137	- 그러나 학습이 기억 사용을 개선하지 못한다: 학습 전 22.0, 최종 22.1. lap만 36.5 → 약 10으로 줄었다 (iter 80에 이미 10). synapse (학습 전 30.4 → 41)에 못 미친다.
+   138	- 이 장기 기억 규칙 자체는 선형 TD(λ)로 알려진 것이다 (가장 가까운 선례: NEC, Pritzel et al. 2017 [기억]). forage에서 되는 것은 "알려진 결과의 확인"이다. 기여는 알려진 방법이 약한 곳 (저장량에 따른 간섭, 변하는 세계, 관측만으로 구별되지 않는 상황)에서 나와야 한다.
+   139	
+   140	## 6. 갈림길 과제 1단계 (`rltdp/world/gate.py`, `gate_memory.py`), 2026-11-15
+   141	
+   142	`plasticity_design.md` 7.2절 과제의 첫 구현. Codex는 이론, 구현·실행은 Claude.
+   143	
+   144	### 6.1 과제와 1단계 단순화
+   145	- 두 출입구를 정해진 경로로 한 번씩 (무작위 순서, 노출 사이 간격 gap). 출입구 행동 d스텝 뒤에 자원 (4종 중 2종, 세계마다 배정). 복도는 두 출입구가 같다 (깊이마다 장면은 다름). 대기 D스텝 (방). 검사: HUD에 필요한 자원, 첫 선택. S_mem = 2·정확도 − 1 (우연 0, 정답 1).
+   146	- **학습 없음**: 패치 임베딩 (147 → 8)과 행동별 주소 사영 (dk = 32)은 고정 난수 (시드 0, 1, 2). 결과 y = 다음 관측의 가운데 칸 임베딩 (Codex 명세의 "생성 모델의 작은 잠재"를 대신한 단순화).
+   147	- **이상적인 느린 모델**: 스텝별 세계 간 평균 μ⁰와 분산 v (세션 구조를 안다). 빠른 기억은 세계별 편차 r = y − μ⁰만, 크기 s = √(v / max v)로 맡는다 (`plasticity_design.md`의 일반형 y = μ⁰ + wᵀe).
+   148	- 기억: ours = 키 선행 ET (α = 2^(−1/8)) + 정밀도 가중 쓰기 (RLS, R = 0.01, P₀ = I, c = 1). 비교: ET 없음, 모두 쓰는 Hebb + ET, band_product (토큰 하나, 극점 짧음·긴 것). 읽기 = cos(M k(a), φ − μ̄).
+   149	- GRU·학습된 느린 모델·tdpc는 아직 안 돌렸다.
+   150	
+   151	### 6.2 구현 중 드러난 것 (명세 수정 두 가지)
+   152	1. **명세 기본형 (c = 1, μ⁰ = 0)은 구조적으로 실패한다** (모든 기억 S ≈ 0). 결정적 스텝 (복도 다음 복도)의 잔차 0 관측도 흔적 위 회귀의 제약이 되어, 갈림길 키 방향의 연합을 지운다 (즉시 결과와 d스텝 뒤 결과를 한 선형 사상으로 맞추라는 모순). 느린 모델 잔차 + 세계 분산 크기 s를 넣자 풀렸다. 이 항은 문턱이 아니라 생성 모델의 일부다.
+   153	2. **읽기는 편차끼리 비교해야 한다.** 원래 φ와의 내적은 자원 임베딩끼리의 상관 때문에 노름이 판정을 좌우했다 (오답 쪽으로).
+   154	
+   155	### 6.3 결과 (시드 0, 1, 2; 세계 1,024개)
+   156	
+   157	| 기억 | d | gap = 0, D = 32 / 256 / 2048 | gap = 32 |
+   158	|---|---|---|---|
+   159	| ours | 4 | 1.00, 0.92, 0.90 (D와 무관) | 0.93, 0.88, 0.54 |
+   160	| ours | 8 | 1.00, 0.92, 0.90 | 0.84, 0.21, 0.71 |
+   161	| ours_noet (α = 0) | 4, 8 | ≈ 0 | ≈ 0 |
+   162	| hebb_et | 4 | 0.74, 0.91, 0.32 | 0.87, 0.30, 0.22 |
+   163	| hebb_et | 8 | 1.00, 1.00, 0.15 | 1.00, 0.01, 0.20 |
+   164	| product / product_long | 4, 8 | ≈ 0 | ≈ 0 |
+   165	| ours, 기억 교환 (다른 세계의 M) | 4, 8 | ≈ 0 | |
+   166	
+   167	읽기 상한 (실제 자원 편차를 그대로 읽음)은 세 시드 모두 1.00. 전체 기록 `results/gate_20261115/stage1.json`.
+   168	
+   169	### 6.4 읽기
+   170	- **ET는 필요하다**: α = 0이면 우연 수준 (사전 예측: ≥ 0.20 하락 → 맞음). 기억 교환이 이득을 전부 없앤다 (예측: ≥ 80% → 맞음).
+   171	- **정밀도 가중 쓰기가 모두 쓰는 Hebb보다 안정적이다** (시드 간 0.90~1.00 대 0.15~1.00).
+   172	- **D 불변은 이 설정에서 당연하다**: 이상적 느린 모델이 대기 스텝의 세계 분산을 0으로 알아서 s = 0, 쓰기가 없다. "무엇이 세계마다 다른가"를 느린 모델이 정답으로 아는 셈이다. 학습된 느린 모델에서 다시 재야 의미가 있다 (Codex 1차 설계의 "미래 필요 분포" 빈칸이 여기로 옮겨 왔다).
+   173	- **gap = 0의 오답 (시드 1, 2) — 정정**: 처음에 "둘째 결과가 첫째 갈림길 키에도 공을 받는다"고 썼으나 측정 결과 틀렸다.
+   174	  첫째 문 키로 읽은 값 ≈ 1.0·r1 − 0.56·r2 (철 그대로), 둘째 문 키 ≈ −0.9·r1 + 0.45·r2 (**"금 − 철"**).
+   175	  첫째 자원이 보일 때 흔적의 70%가 직전 복도 키라서 공이 주로 **복도**에 갔다 (기록 뒤 P: 흔적 방향 0.001, 갈림길 키 방향 0.96).
+   176	  둘째 노출의 복도 (모양이 같다)에서 기억이 철을 예측하고, 오차 "금 − 철"이 아직 불확실한 둘째 갈림길 키에 쓰였다. 덮어쓰기가 아니라 explaining-away가 잘못된 원인 지목 위에서 작동한 것이다.
+   177	  오답은 전부 둘째 문 자원이 필요할 때 (시드 1: 0.914, 시드 2: 0.897; 첫째 문 자원이 필요할 때는 1.000)이고, 철·금 임베딩이 닮은 세계에서 난다.
+   178	- **gap = 32가 더 나쁜 이유**: 같은 방 장면이 반복되면 흔적에 방 키가 쌓여 (노름 약 1/(1 − α) ≈ 12) 둘째 결과의 회귀 입력을 방 키가 지배한다.
+   179	- product의 실패는 토큰 하나라 계수 1인 탓도 있어 "창과 보존이 묶여서"로만 읽을 수 없다.
+   180	
+   181	### 6.5 다음
+   182	- 손으로 덧붙이지 않고, 위 두 실패 (원인 혼선, 반복 상태의 흔적 부풀림)를 요구로 다시 형식화하는 것은 Codex (이론)에 묻는다.
+   183	- 학습된 느린 모델 (μ⁰, v를 세계에 걸쳐 학습)과 GRU 비교 (학습 대기 8~32, 평가 256/2048).
+   184	
+   185	### 6.6 행동의 놀라움으로 흔적 입력을 가중 (ours_surp)
+   186	
+   187	원리: 공은 오래된 정도가 아니라 **미래를 가른 지점**에 간다. 복도는 갈림길 선택으로 이미 정해진 결과다. 흔적 입력을 e ← α e + u_t k_t, u_t = −log p(a_t)로 바꾼다 (p = 느린 모델의 스텝별 행동 빈도. 갈림길 ln 2, 복도·방 0). 관측의 놀라움은 넣지 않는다 (관측은 결과, 행동은 원인). 3요소 규칙의 "행동 표본 편차"와 같은 뜻.
+   188	
+   189	사전 예측 (실행 전): gap 0·32 모두 S_mem ≥ 0.95, 시드 차이 소멸, 둘째 문 키 ≈ r2.
+   190	
+   191	| | d | gap 0 (D = 32, 2048) | gap 32 (D = 32, 2048) |
+   192	|---|---|---|---|
+   193	| ours | 4 | 1.00, 0.92, 0.90 | 0.93, 0.88, 0.54 |
+   194	| ours | 8 | 1.00, 0.92, 0.90 | 0.84, 0.21, 0.71 |
+   195	| **ours_surp** | 4, 8 | **1.00, 1.00, 1.00** | **1.00, 1.00, 1.00** |
+   196	| ours_surp, 기억 교환 | 4 | ≈ 0 | |
+   197	
+   198	기록 `results/gate_20261115/surprisal.json`. 두 실패 (복도의 원인 지목, 방 키의 흔적 부풀림)가 같은 원리로 함께 풀렸다.
+   199	
+   200	남은 것:
+   201	- 둘째 문 키 분해: gap 32에서 ≈ 1.7·r2 (깨끗), gap 0에서 ≈ −1.1·r1 + 1.7·r2. 붙은 노출에서는 첫째 갈림길 선택이 실제로 금보다 먼저 일어났으므로 흔적에 남아 금의 일부를 설명한다 (정확도에는 영향 없음).
+   202	- **놀라움 ≠ 원인**: 느린 모델이 이력 전체를 보면 둘째 갈림길 선택 ("남은 문")은 예측 가능 (u = 0)인데도 원인이다. 여기서는 스텝별 빈도만 써서 드러나지 않았다.
+   203	- 느린 모델 (μ⁰, v, 행동 빈도)이 여전히 이상적인 것이다. 학습된 느린 모델에서 다시 재야 한다.
+   204	
+   205	## 7. 초기화 없는 흐름: 일정 망각 대 증거 망각 (`rltdp/world/gate_stream.py`), 2026-11-15
+   206	
+   207	세계 200개 (d = 4, D = 32, gap = 0)를 경계 신호 없이 이어 붙이고 기억을 비우지 않는다. 흐름 256개, 시드 0, 1, 2. 망각은 관측 기회 (s > 0)마다:
+   208	none (Q = 0), const (P += h q₀ I), evidence (두 가설 우도비로 변화 확률 χ, 관측한 주소 방향만 P += χ q₀ x̂x̂ᵀ). h = 1/1024, q₀ = 1 (`plasticity_design.md` 7.3절의 사전 고정값).
+   209	
+   210	사전 예측 (실행 전): none은 세계가 지날수록 우연으로, const는 0.9 안팎에서 평평, evidence는 0.9에서 1.0으로 오름.
+   211	
+   212	S_mem (세계 순번 구간 평균; 시드 0, 1, 2 범위):
+   213	
+   214	| 기억 | 망각 | 1번째 | 2–5 | 6–20 | 21–50 | 101–200 |
+   215	|---|---|---|---|---|---|---|
+   216	| ours | none | 0.91–1.00 | 0.37–0.48 | 0.21–0.24 | 0.11–0.13 | 0.03–0.06 |
+   217	| ours | const | 0.91–1.00 | 0.25–0.32 | 0.24–0.28 | 0.27–0.29 | 0.19–0.27 |
+   218	| ours | evidence | 0.91–1.00 | 0.34–0.48 | 0.20–0.25 | 0.11–0.13 | 0.02–0.06 |
+   219	| ours_surp | none | 1.00 | 0.48–0.61 | 0.25–0.29 | 0.16–0.17 | 0.07–0.08 |
+   220	| ours_surp | const | 1.00 | 0.56–0.69 | 0.52–0.58 | 0.54–0.58 | 0.54–0.59 |
+   221	| ours_surp | evidence | 1.00 | 0.67–0.78 | 0.43–0.75 | 0.25–0.74 | 0.17–0.73 |
+   222	
+   223	기록 `results/gate_20261115/stream.json`. **예측은 none만 맞았다.** const와 evidence 모두 세계 2부터 크게 떨어진다.
+   224	
+   225	진단 (χ와 크기를 관측 기회마다 출력):
+   226	- **ours의 evidence는 한 번도 켜지지 않는다 (χ ≈ 0).** 흐름에서는 방 키가 세계를 넘어 흔적에 쌓여 |x|² ≈ 60–86이 된다. "바뀜" 가설의 예측 분산 R + q₀|x|²가 너무 커져 어떤 오차도 설명하지 못한다. 6.4의 "반복 상태가 흔적을 부풀림"이 변화 감지까지 막는다.
+   227	- **ours_surp의 evidence는 켜지다 말다 한다 (χ = 0.98, 1.0, 0.32, 0.00, …).** 놓치는 경우: 오차 |ε₀| ≈ 0.3–0.5가 "그대로" 가설의 예측 분산 (S₀ ≈ 0.017)에 비해 분명히 큰데도, "바뀜" 가설이 q₀ = 1 때문에 훨씬 큰 오차 (분산 약 0.3)를 예측해서 둘 다 설명이 나쁘고 "그대로"가 이긴다. **q₀ = 1은 실제 내용의 크기 (자원 편차의 세계 간 분산, 성분당 약 0.03)와 맞지 않는다.** P₀ = I도 같은 문제다.
+   228	- const는 h q₀ = 0.001씩만 P를 키워, 세계가 바뀌어도 새 내용이 작은 이득으로만 쓰인다.
+   229	
+   230	정리: 실패는 증거 망각의 원리가 아니라 **척도 두 가지**에서 왔다. (1) 흔적 부풀림 (놀라움 가중이 해결), (2) 사전 분산 q₀, P₀가 내용의 실제 분산과 다름. 원리대로라면 q₀·P₀는 손으로 고르는 값이 아니라 느린 모델이 아는 세계 간 분산 (v)에서 와야 한다 (경험적 베이즈). 아직 돌리지 않았다.
+   231	
+   232	### 7.1 사전 척도를 경험적 베이즈로 (scale = eb)
+   233	
+   234	p₀ = v̄ / E|x|² (느린 모델의 세계 간 분산, 학습용 흐름의 회귀 입력 크기), P₀ = p₀ I, q₀ = p₀. h = 1/1024, R = 0.01은 그대로. 기록 `results/gate_20261115/stream_eb.json`.
+   235	
+   236	| 기억 | 망각 | 1번째 | 2–5 | 6–20 | 21–50 | 101–200 |
+   237	|---|---|---|---|---|---|---|
+   238	| ours | none / const / evidence | 0.38–0.91 | 0.29–0.56 | 0.21–0.28 | 0.14–0.18 | 0.07–0.11 |
+   239	| ours_surp | none | 1.00 | 0.49–0.61 | 0.25–0.29 | 0.16–0.17 | 0.07–0.08 |
+   240	| ours_surp | const | 1.00 | 0.49–0.63 | 0.30–0.34 | 0.29–0.32 | 0.30–0.31 |
+   241	| **ours_surp** | **evidence** | 1.00 | 0.71–0.85 | 0.69–0.81 | 0.69–0.80 | **0.68–0.80** |
+   242	
+   243	- ours_surp + evidence는 0.17–0.73 (시드마다 다름)에서 0.68–0.80 (안정, 200번째 세계까지 평평)으로. 그러나 초기화하는 경우 (1.00)에 못 미친다.
+   244	- ours (놀라움 가중 없음)는 척도와 무관하게 실패 (흔적 부풀림).
+   245	- 진단 (시드 1, 흐름 하나, 관측 기회 198개): **실제로 자원이 바뀐 152번 중 χ > 0.5는 46%, 그대로인 46번 중 0%.** 거짓 경보는 없고 놓침이 절반이다.
+   246	  원인은 사건 위험률 h = 1/1024다. 이 흐름에서 실제 변화율은 관측 기회당 약 0.77이다 (세계가 약 42스텝마다 바뀜). h도 v̄처럼 세계 간 통계에서 와야 할 사전이다. 7.3절의 1/1024는 Minecraft처럼 드문 변화를 가정한 값이다.
+   247	
+   248	### 7.2 사건 위험률 h도 흐름 안에서 추정 (forget = evidence_h)
+   249	
+   250	h ~ Beta(a, b), 사전 Beta(1, 1), 관측 기회마다 a += χ, b += 1 − χ. 정답 변화율은 주지 않는다. 놀라움 가중, eb 척도. 기록 `results/gate_20261115/stream_eb_h.json`.
+   251	
+   252	| 망각 | 1번째 | 2–5 | 6–20 | 21–50 | 51–100 | 101–200 |
+   253	|---|---|---|---|---|---|---|
+   254	| evidence (h = 1/1024) | 1.00 | 0.71–0.85 | 0.69–0.81 | 0.69–0.80 | 0.69–0.81 | 0.68–0.80 |
+   255	| **evidence_h** | 0.96–1.00 | 0.84–0.94 | 0.87–0.92 | 0.86–0.93 | 0.87–0.94 | **0.86–0.94** |
+   256	
+   257	추정 h (세계 1 / 20 / 200): 시드 0: 0.49 / 0.61 / 0.67, 시드 1: 0.57 / 0.66 / 0.70, 시드 2: 0.46 / 0.58 / 0.65. 실제 변화율 (약 0.75)보다 약간 낮게 수렴한다 (놓친 변화가 χ 합에 덜 들어가므로).
+   258	
+   259	초기화 (1.00)와의 남은 차이: 놓친 변화, 그리고 한 번 쓰기의 이득이 v̄ / (v̄ + R) ≈ 0.75라 바뀐 내용이 한 번에 다 바뀌지 않는다 (R = 0.01이 내용 분산 v̄ ≈ 0.03에 비해 크다).
+   260	
+   261	## 8. 학습된 인코더가 시냅스 입력을 만든다 (`rltdp/world/gate_learned.py`), 2026-11-15
+   262	
+   263	틀 (사용자): DreamerV3는 F를 목적함수로 잘 학습하지만, 놀라움·정밀도는 학습 때 경사로만 쓰이고 추론 중에는 버려져 실시간 적응이 없다. 구조는 그대로 두고 기억을 시냅스로 다시 정의하면, 추론 시점에 놀라움 (쓰기 세기)·정밀도·실시간 적응을 정의할 수 있다. 원인 구별은 시냅스가 하고, 시냅스가 구별할 수 있는 입력은 규모로 학습된 인코더가 만든다.
+   264	6.6의 놀라움 가중 (u = −log p(a))은 이 틀에서 보면 정의 (관측이 아니라 행동의 놀라움)도 자리 (쓰기 세기가 아니라 흔적 입력)도 틀린 손 편향이었다.
+   265	
+   266	설정: 시냅스는 1단계 ours 그대로 (흔적 α = 2^(−1/8), RLS, 흔적 입력에 손 무게 없음). 쓰기 세기 s = 이상적 느린 모델의 세계 간 분산 크기 (월드 모델 놀라움의 대리, 다음 단계에서 학습된 것으로). 바꾼 것은 키 하나:
+   267	random (고정 난수, 정규화) / surp (random + 손 편향, 비교) / learned (MLP([장면, 행동]) → 키, 크기 정규화 없음).
+   268	learned 학습: 같은 세계에서 대기 (8, 16, 32) 뒤 무작위 문을 다시 방문하는 세션, 재방문 갈림길 HUD는 무작위, 손실 = 재방문 결과를 시냅스로 예측한 오차, 2,000회 × 64세션.
+   269	평가: 원래 과제, 후보 문으로 걸어 들어갈 때 생길 흔적으로 읽음 (1단계는 갈림길 키만으로 읽었다), d = 4, 세계 1,024개. 기록 `results/gate_20261115/learned.json`.
+   270	
+   271	| 키 | 시드 0 | 시드 1 | 시드 2 | (D = 32, 256, 2048 모두 같음) |
+   272	|---|---|---|---|---|
+   273	| random | 0.51 | 0.03 | 0.00 | |
+   274	| surp (손 편향) | 1.00 | 1.00 | 1.00 | |
+   275	| **learned** | **1.00** | **1.00** | **1.00** | |
+   276	
+   277	학습된 키의 평균 크기 (노출 중): 갈림길 1.2–3.3, 복도 0.8–1.4, 방 0.12–0.24. 인코더가 손으로 정하지 않은 채 **선택 스텝을 크게, 복도를 그 절반쯤, 반복되는 방을 거의 0으로** 만들었다. 6.4의 두 실패 (복도의 원인 지목, 방 키의 흔적 부풀림)를 손 편향 없이 학습이 해결했다.
+   278	
+   279	단서:
+   280	- random이 1단계 (1.00)보다 나쁜 것은 읽기 방식 차이다: 걸어 들어갈 때의 흔적에는 대기 중 쌓인 방 키 (노름 약 12)가 남아 읽기를 오염시킨다.
+   281	- 쓰기 세기 s는 여전히 이상적 느린 모델이다. 대기 중 s = 0이라 대기 길이 불변은 그 덕도 있다. 학습된 월드 모델의 놀라움으로 바꾸는 것이 다음이다.
+   282	- 학습 신호는 재방문 결과 예측이고 학습 대기는 32 이하, 평가 2048에서도 1.00 (학습 길이의 64배).
+   283	
+   284	### 8.1 쓰기 세기도 학습된 월드 모델에서 (learned_wm)
+   285	
+   286	이상적 느린 모델 (스텝별 세계 간 평균·분산) 대신, (장면, 행동) → 다음 결과의 평균 μ⁰와 분산 v를 내는 작은 신경망을 여러 세계에 걸친 가우시안 음의 로그우도 (F의 정확도 항, DreamerV3의 월드 모델 학습과 같은 꼴)로 먼저 학습하고 고정. 쓰기 = 정밀도 가중 예측 오차 (내용 r = y − μ⁰, 크기 s = √(v / v̄)). 그 위에서 키를 학습. 스텝 번호는 주지 않는다. 기록 `results/gate_20261115/learned_wm.json`.
+   287	
+   288	학습된 s (시드 0의 한 세션): 자원이 나오는 스텝 1.0, 결정적 복도 0.13–0.15, 자원 다음 스텝 0.69 ("갈림길인가 방인가"를 장면만으로 모름), 대기 방 0.4 (마지막 방 스텝만 다음이 갈림길이라 구별 불가). **대기 중에도 쓰기가 일어나므로 대기 길이 불변은 더 이상 공짜가 아니다.**
+   289	
+   290	| | 시드 0 | 시드 1 | 시드 2 |
+   291	|---|---|---|---|
+   292	| learned_wm, D = 32 / 256 / 2048 | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 |
+   293	
+   294	학습된 키 크기: 갈림길 4.2–9.1, 복도 3.8–8.0, 방 2.9–7.5. 8절과 달리 방 키를 작게 만들지 않았다. 크기가 아니라 방향으로 구별하는 것으로 보이며, 어떻게 구별하는지는 아직 분석하지 않았다.
+   295	
+   296	정리: 이 과제에서 시냅스 (흔적 + 정밀도 가중 쓰기)는 손 편향도 이상적 느린 모델도 없이, 학습된 인코더와 학습된 월드 모델의 놀라움만으로 학습 길이의 64배 대기를 견딘다. 요구 1 (기억)·2 (원인에 잇기)를 이 규모에서 만족. 요구 3 (새 목표에 바로 적응)은 아직 시험 전.
+   297	
+   298	## 9. 새 목표에 바로 적응: 같은 기억에 A → B → A (`rltdp/world/gate_goal.py`), 2026-11-15
+   299	
+   300	`insession_design.md` 10.2절 명세. 두 문을 한 번씩 노출 → 자원 A를 목표로 (HUD = A) A의 문을 8번 실행, A를 볼 때마다 보상 +1 → 검사 위치로 돌아와, **쓰기·갱신 없이 순수 읽기로** 목표 g = A, B, A를 차례로 묻는다 (B = 같은 세계에서 본 다른 자원). 시드 0, d = 4, 세계 1,024개. 기록 `results/gate_20261115/goal_ABA.json`.
+   301	
+   302	| 기억 | g = A | g = B | g = A |
+   303	|---|---|---|---|
+   304	| **사실 기억** (8.1의 learned_wm: 학습된 키 + 학습된 월드 모델의 정밀도 가중 쓰기, 선호로 읽기) | 1.00 | **1.00** | 1.00 |
+   305	| 가치 캐시 (TD(λ), tdpc와 같은 규칙, 정규화된 난수 키) | 1.00 | **−1.00** | 1.00 |
+   306	
+   307	사전 예측 (실행 전): 사실 기억은 셋 다 맞음, 가치 캐시는 B에서 반대 (S ≈ −1). 둘 다 맞았다.
+   308	가치 캐시는 보상받은 A의 문을 목표와 무관하게 고른다 (목표는 HUD로만 들어가고, 키의 작은 차이로는 굳은 가치를 뒤집지 못한다). 사실 기억은 무엇이 어디 있는지를 담고 가치를 읽을 때 지금의 선호로 계산하므로, 재학습 없이 목표가 바뀌는 즉시 맞춘다. 요구 3 (새 목표에 바로 적응)을 이 규모에서 만족.
+   309	
+   310	비고: 가치 캐시에 학습된 키를 쓰면 (정규화해도) 스텝끼리 방향이 닮아 흔적이 커지고 TD 걸음 (β = 0.5)이 진동해 부호가 뒤집혔다 (A에서 −1). 정규화하지 않으면 키 크기 (약 9) 때문에 발산 (≈ 0). 비교는 tdpc 1단계와 같은 정규화된 난수 키로 했다.
+   311	
+   312	## 10. 스스로 움직이는 에이전트 + 세션 안 목표 전환 (`rltdp/world/goal_forage.py`), 2026-11-15
+   313	
+   314	9×9 격자, 시야 3×3, 배경·자원 3종 위치는 세계마다 무작위, 목표 자원은 입력으로, 도착하면 +1 후 목표가 다른 종류로 (자원은 남음), T = 256. 둘 다 같은 GRU 128 + A2C (GAE), 1,500회 × 64 에피소드, 시드 0.
+   315	synapse 판은 매 스텝 행동마다 cos(M k(o, a), φ_g − ȳ)를 GRU 입력에 더한다 (시냅스: 흔적 + 정밀도 가중 쓰기, 다음 칸 임베딩을 씀, 고정 난수 키 128차원). 기록 `results/goal_forage_20261115.json`.
+   316	
+   317	| | 보상/에피소드 | 이미 본 목표까지 | 처음 보는 목표까지 |
+   318	|---|---|---|---|
+   319	| 무작위 정책 (학습 전) | 1.3 | 47 | 97 |
+   320	| gru | 18.7 | 10.5 | 28.4 |
+   321	| gru + synapse | 19.2 | 10.3 | 27.3 |
+   322	
+   323	차이 없음. 진단: **시냅스 읽기만 따르는 정책 (학습 없이 argmax feat)은 보상 0.2** — 맴돈다. 이 시냅스는 "흔적 다음에 어떤 칸이 나왔나"의 회귀라, 경로를 모르는 열린 격자에서 한 스텝 키로 읽으면 "목표가 그 방향 앞에 있다"를 말하지 못한다 (흔적 창에 목표를 지나친 뒤의 스텝도 섞인다). 읽기 설계를 즉석에서 정한 것이 문제.
+   324	또 9×9·256스텝은 GRU만으로도 기억할 수 있는 규모일 수 있다 (이미 본 목표 10.5스텝).
+   325	다음 후보: 같은 시냅스에서 쓰는 목표를 "다음 칸 + γ × 다음 상태에서 기억이 예측하는 미래"로 (관측 특징에 대한 TD(λ) = 후속 특징). 읽기는 지금 목표와의 내적. 그다음 격자·에피소드를 키운다.
+   326	
+   327	### 10.1 학습된 키 (SwiGLU) + 후속 특징식 쓰기 (synapse_l), 9×9·256스텝
+   328	
+   329	3,000회 학습 뒤 GRU 27.8 (이미 본 목표 7.60스텝) 대 GRU + synapse_l 27.1 (7.59스텝). 차이 없음. 15×15·1,024스텝 판은 GRU가 500회째 보상 0.04로 망가져 (무작위보다 못함) 중단. 기록 `results/goal_forage_n9_t256.json`.
+   330	비교 구도가 틀렸다: RL² GRU는 메타 학습된 문맥 내 학습기라 DreamerV3의 대리가 아니고, 목표를 입력으로 주는 과제는 신용할당이 아니라 기억력을 잰다. 이 연구의 주장 (경사 없이 보상을 받는 즉시 신용할당해 새 보상에 적응)은 11절에서 잰다.
+   331	
+   332	## 11. 세션 안 신용할당으로 새 보상에 곧바로 적응 (`rltdp/world/credit.py`), 2026-11-15
+   333	
+   334	goal_forage 격자 (9×9, 시야 3×3), 목표 입력 없음. 자원 3종 중 한 종류만 보상 (밟을 때마다 +1, 자원은 남음). 무엇이 보상인지는 겪어서만 안다. T = 512, 에피소드 512개, 시드 0.
+   335	학습 분포: 보상 자원 0. 시험 "new": 자원 2 (학습 중 한 번도 보상이 아니었음). "switch": 앞 절반 자원 2, t = 256에서 알리지 않고 자원 1로.
+   336	- **frozen** (DreamerV3식): 시야 → MLP 정책·가치, A2C로 학습 분포에서 1,500회 × 64 에피소드 학습 뒤 고정. 새 보상에는 경사 갱신으로만 따라간다.
+   337	- **value** (시냅스 가치 캐시, tdpc 규칙)와 **fact** (시냅스 후속 특징 + 세션 안 보상 가중치): 학습 없음, 고정 난수 키. 모든 적응이 세션 안 시냅스. γ = 0.9, λ = 0.8, β = 0.5.
+   338	
+   339	64스텝 구간별 보상 (에피소드 평균):
+   340	
+   341	| | 조건 | 0–63 | 64–127 | 128–191 | 192–255 | 256–319 | 320–383 | 384–447 | 448–511 |
+   342	|---|---|---|---|---|---|---|---|---|---|
+   343	| frozen | train (자원 0) | 10.2 | 12.1 | 12.6 | 13.0 | 13.3 | 13.3 | 13.4 | 13.1 |
+   344	| frozen | **new** (자원 2) | 0.8 | 0.9 | 0.8 | 0.8 | 0.8 | 0.8 | 0.8 | 0.9 |
+   345	| value | **new** | 1.7 | 5.0 | 8.5 | 12.1 | 15.4 | 18.2 | 20.6 | 22.4 |
+   346	| fact | **new** | 1.4 | 3.9 | 6.2 | 9.1 | 11.2 | 12.8 | 14.1 | 15.6 |
+   347	| value | switch (2 → 1) | 1.7 | 5.0 | 8.5 | 12.1 | 3.3 | 7.0 | 10.6 | 13.5 |
+   348	| fact | switch | 1.4 | 3.9 | 6.2 | 9.1 | 3.4 | 6.6 | 9.6 | 12.0 |
+   349	
+   350	frozen을 새 보상 (자원 2)으로 A2C를 이어 학습한 경우, 512스텝당 보상: 50회 갱신 (82만 환경 스텝) 7.4, 200회 (330만) 8.5, 400회 (660만) 9.3.
+   351	
+   352	사전 예측 (실행 전) 대조:
+   353	- frozen은 처음 보는 보상에서 우연 수준, 회복에 경사 갱신이 많이 든다 → **맞음** (660만 스텝 뒤에도 512스텝당 9.3).
+   354	- 두 시냅스는 첫 보상 뒤 경사 없이 따라간다 → **맞음**. value는 한 에피소드 안에서 64스텝당 1.7 → 22.4 (512스텝 합 약 104). 학습된 frozen이 자기 학습 보상에서 내는 수준 (약 104)과 같다.
+   355	- 전환 뒤 fact가 value보다 빨리 회복 → **틀림**. 둘 다 약 3.3에서 다시 오르고 value가 조금 빠르다 (13.5 대 12.0). fact는 처음 적응도 더 느리다.
+   356	
+   357	읽기: 세션 안 시냅스 신용할당 (흔적 × 보상 오차)은 학습 없이 처음 보는 보상에 한 에피소드 안에서 적응하고, 경사로만 적응하는 고정 정책은 수백만 스텝이 지나도 거의 회복하지 못한다. 이 대비가 이 연구의 주장 그대로다. 사실 기억 + 보상 가중치 (후속 특징식)의 이점 (보상이 바뀌어도 지도를 재사용)은 이 설정에서 나타나지 않았다. 고정 난수 키 위의 후속 특징이 걸어 본 길에 대해서만 맞아서 지도로서 약한 것으로 보인다 (10절과 같은 원인).
+   358	
+   359	## 12. 통합 시험 축소 1판: 지연 채집과 바뀌는 의뢰 (`rltdp/world/errand.py`), 2026-11-15
+   360	
+   361	`integrated_experiment_design.md` (Codex)의 과제를 줄여 핵심 선택만. 11×11 격자, 시야 3×3 + HUD 3칸 (의뢰 카드, 도착한 산출물, 완료 도장), 행동 6개, 채집처 5곳 (겉모습 같음, 산출물 {A, A, B, B, C}), 상호작용 8스텝 뒤 산출물이 HUD에 도착 (출발지 표시 없음), 비공개 의뢰 (카드 뒷면, 맞는 산출물 도착에 +1).
+   362	교사 경로: 관찰 (5곳 1회씩, 보상 없음) → A 의뢰 ×4 → B 의뢰: b0에서 첫 +1 → 보존 256스텝 중 b0을 B → C로 → b0 재방문 (C, 보상 0) → **자율 64스텝: 첫 상호작용 채집처가 b1인가** (관찰 때 B를 봤지만 보상받은 적 없음). 세계 256개, 시드 0, 학습 없음, 고정 난수 키 128차원.
+   363	뺀 것: 고정 정책 비교군, 내부 벽, 조작판, 공개 의뢰 A → B → A, 긴 세션. 기록 `results/errand_20261115.json`.
+   364	
+   365	| | b1 (정답) | b0 (옛 자리) | 다른 곳 | 안 감 |
+
+codex
+현재 문서의 핵심 제약은 확인했습니다. 빠른 기억은 시냅스 하나에 두고, 키는 학습하되 별도 순환 상태나 저장소를 더하지 않는 방향입니다. 결과를 해석할 때는 “예측 우도가 좋아졌는가”와 “필요한 사실을 보존하고 수정했는가”를 구분하고 있습니다. 11월 17일 실행에서는 이 둘이 함께 좋아지지 않았습니다.
+
+exec
+/bin/bash -lc 'nl -ba scripts/world/diag_20261117/synapse_cellkey.py' in /workspace/RL-TDP
+ succeeded in 0ms:
+     1	# 칸별 키판 (2026-11-17): 명세 1에서 키만 칸마다 다르게. 시냅스 (M_p, P_p, σ_p, R_p, q_p)는 명세 1처럼 칸마다 따로.
+     2	#   u_p = w + MLP([w; onehot p]) (마지막 층 0 → 초기에는 모든 칸 u_p = w, 명세 1 초기와 같음), k̂_p = W_k[a] u_p,
+     3	#   ℓ_p = 선형([w; onehot a; onehot p]), 흔적 e_p = α e_p + k_p (칸별, α 공유), z_p = σ_p [k_p; e_p].
+     4	# 이하 명세 1 설명 (키 경로 외에는 그대로):
+     5	# 명세 1 (docs/world/synapse_layer_spec_basic.md): 12.13 구성에서 키 경로만 학습.
+     6	#   u = w + MLP(w) (마지막 층 0), k̂ = W_k[a] u (초기 = 12.13의 Wr[a]), k = exp(ℓ) k̂/|k̂| (ℓ = 선형([w; onehot a]), 초기 0),
+     7	#   e = α e + k (α = sigmoid(θ_α), 초기 2^(-1/8)), x = [k; e], z_p = σ_p x. 쓰기는 eb_scale.py write() (QN=1) 그대로.
+     8	#   목적: 학습 세계 교사 세션의 순차 예측 NLL (경험적 베이즈). 키 경로 lr 1e-3, 칼만 매개변수 lr 0.05, 배치 8.
+     9	# 환경변수: ITERS (최대 반복, 기본 2000; 0 = 학습 전 판정만), PATIENCE (기본 500), OUT (결과 JSON 경로)
+    10	import sys, os, json, time; sys.path.insert(0, '/workspace/RL-TDP')
+    11	import jax, jax.numpy as jnp, numpy as np, optax
+    12	from rltdp.world import errand as ER, errand_learned as EL, errand_prec as EP, errand_reuse as RU
+    13	
+    14	ER.PUBLIC = False
+    15	We, ybar = EL.emb_fixed(0)
+    16	p, vmax = EP.train("random", seed=0, D=256, iters_k=0, log=lambda m: None)
+    17	feat, wm, _ = EP.parts(p, We, ybar, "random")
+    18	KD, NPOLE = EP.DK, 2
+    19	DZ = NPOLE * KD
+    20	DW = 9 * EP.H
+    21	# 관측 잡음 바닥: 관측을 8비트 영상으로 보면 픽셀당 양자화 분산 (1/255)²/12, 고정 임베딩 We를 거친 특징 차원당 분산 = 평균 ‖We 열‖² × 그 값.
+    22	# OBS_NOISE=0이면 끔 (이전 판과 같음).
+    23	R0 = float(np.mean(np.sum(np.array(We) ** 2, 0))) / 255.0 ** 2 / 12.0 if os.environ.get('OBS_NOISE', '1') == '1' else 0.0
+    24	print("R0 (observation noise floor)", R0, flush=True)
+    25	phi = (ER.TEX[ER.ITEM0:ER.ITEM0 + 3].reshape(3, -1) @ We) - ybar
+    26	gB = phi[1] - phi.mean(0)
+    27	LOG1213 = '/workspace/RL-TDP/docs/world/results/errand_diag_20261115b/eb_process_noise.log'
+    28	p13 = json.loads(open(LOG1213).read().strip().splitlines()[-1])
+    29	
+    30	# ---- 매개변수: 키 경로 (kp)와 칼만 (kf)
+    31	kr = jax.random.split(jax.random.PRNGKey(11), 2)
+    32	kp = dict(W1=jax.random.normal(kr[0], (DW + EP.NP, 128)) / np.sqrt(DW + EP.NP), b1=jnp.zeros(128),
+    33	          W2=jnp.zeros((128, DW)), b2=jnp.zeros(DW),
+    34	          Wk=jnp.array(p["Wr"]),                                   # [NA, 128, 72], 12.13의 난수 키
+    35	          lw=jnp.zeros(DW + ER.NA + EP.NP), lb=jnp.zeros(()),
+    36	          ta=jnp.array(np.log(2.0 ** (-1 / 8) / (1 - 2.0 ** (-1 / 8)))))
+    37	kf = dict(ls=jnp.log(jnp.array(p13["sigma2"])), lr=jnp.log(jnp.array(p13["R"])), lq=jnp.log(jnp.array(p13["q"])))
+    38	th = dict(kp=kp, kf=kf)
+    39	
+    40	
+    41	POS = jnp.eye(EP.NP)
+    42	
+    43	
+    44	def key_fn(kp, o, a):
+    45	    """칸 12개의 키 [12, KD]와 ℓ [12]."""
+    46	    w = feat(o)[:9].reshape(-1)
+    47	    wp = jnp.concatenate([jnp.tile(w, (EP.NP, 1)), POS], -1)                  # [12, DW+12]
+    48	    u = w + jax.nn.silu(wp @ kp["W1"] + kp["b1"]) @ kp["W2"] + kp["b2"]        # [12, DW]
+    49	    kh = u @ kp["Wk"][a].T                                                    # [12, KD]
+    50	    li = jnp.concatenate([jnp.tile(jnp.concatenate([w, jax.nn.one_hot(a, ER.NA)]), (EP.NP, 1)), POS], -1)
+    51	    ell = li @ kp["lw"] + kp["lb"]
+    52	    return jnp.exp(ell)[:, None] * kh / (jnp.linalg.norm(kh, axis=-1, keepdims=True) + 1e-8), ell
+    53	
+    54	
+    55	def alpha(kp):
+    56	    return jax.nn.sigmoid(kp["ta"])
+    57	
+    58	
+    59	def step_e(kp, e, o, a):
+    60	    k, ell = key_fn(kp, o, a)
+    61	    e = jnp.stack([k, alpha(kp) * e[:, 1] + k], 1)              # [12, 2, KD], 칸별 극 {0, 반감기 학습}: [지금 키; 흔적]
+    62	    return e, ell
+    63	
+    64	
+    65	def write(th, O, acts, stop_t):
+    66	    kp, kf = th["kp"], th["kf"]
+    67	    R, Q, sg = jnp.exp(kf["lr"]), jnp.exp(kf["lq"]), jnp.exp(0.5 * kf["ls"])
+    68	
+    69	    @jax.checkpoint
+    70	    def f(c, x):
+    71	        M, P, e = c
+    72	        o, a, o2, t = x
+    73	        e, ell = step_e(kp, e, o, a)
+    74	        mu, _ = wm(o, a)
+    75	        r = feat(o2) - mu
+    76	
+    77	        def pp(Mp, Pp, sp, rp, Rp, Qp, ep):
+    78	            Pp = Pp + Qp * jnp.eye(DZ)
+    79	            z = sp * ep.reshape(-1)
+    80	            err = rp - Mp @ z; Pz = Pp @ z; S = Rp + R0 + z @ Pz             # R0: 관측 잡음 바닥 (8비트 양자화)
+    81	            M2 = Mp + jnp.outer(err, Pz) / S
+    82	            got = (M2 @ z) @ rp / (rp @ rp + 1e-12)
+    83	            return M2, Pp - jnp.outer(Pz, Pz) / S, 0.5 * (err @ err / S + EP.H * jnp.log(S)), got
+    84	        M2, P2, nll, got = jax.vmap(pp)(M, P, sg, r, R, Q, e)
+    85	        keep = t > stop_t
+    86	        return (jnp.where(keep, M, M2), jnp.where(keep, P, P2), e), (jnp.where(keep, 0.0, nll.sum()), got[EP.SLOT], ell[EP.SLOT], e[EP.SLOT].reshape(-1))
+    87	    c0 = (jnp.zeros((EP.NP, EP.H, DZ)), jnp.tile(jnp.eye(DZ), (EP.NP, 1, 1)), jnp.zeros((EP.NP, NPOLE, KD)))
+    88	    return jax.lax.scan(f, c0, (O[:-1], acts, O[1:], jnp.arange(acts.shape[0])))
+    89	
+    90	
+    91	def sess_nll(th, sess):
+    92	    O, _, _ = EL.observe_stream(sess)
+    93	    _, (nll, _, _, _) = write(th, O, sess["acts"], 10 ** 9)
+    94	    return nll.sum()
+    95	
+    96	
+    97	# ---- 자료
+    98	_, tr = EL.stack_sessions(range(50_000, 51_024), 256)
+    99	_, va = EL.stack_sessions(range(51_024, 51_152), 256)
+   100	print("lengths: train", tr["acts"].shape, "val", va["acts"].shape, flush=True)
+   101	
+   102	
+   103	@jax.jit
+   104	def val_nll(th):
+   105	    def chunk(c, idx):
+   106	        sb = jax.tree_util.tree_map(lambda x: jax.lax.dynamic_slice_in_dim(x, idx, 16), va)
+   107	        return c + jax.vmap(lambda s: sess_nll(th, s))(sb).sum(), None
+   108	    tot, _ = jax.lax.scan(chunk, 0.0, jnp.arange(0, 128, 16))
+   109	    return tot / 128
+   110	
+   111	
+   112	# ---- 판정 (eb_scale.py와 같음, 키·흔적만 학습된 식)
+   113	sessions, stack = EL.stack_sessions(range(1000, 1256), 256)
+   114	plans, arrive = EL.plans_for(sessions)
+   115	b1, b0 = np.array(stack["b1"]), np.array(stack["b0"])
+   116	
+   117	
+   118	def judge_one(th, sess, plans, ai_all, zt=False):
+   119	    kp, kf = th["kp"], th["kf"]
+   120	    O, s_end, _ = EL.observe_stream(sess)
+   121	    t_c = RU.last_arrival(O)
+   122	    Y = jax.vmap(feat)(O[1:])[:, EP.SLOT]
+   123	    blank = feat(ER.TEX[jnp.full(12, ER.BLANK)].reshape(12, -1))[EP.SLOT]
+   124	    arrived = ~jnp.all(jnp.isclose(Y, blank, atol=1e-5), -1)
+   125	    (M, P, e), (_, got, ell, X) = write(th, O, sess["acts"], t_c)
+   126	    got_mean = jnp.sum(jnp.where(arrived, got, 0)) / jnp.maximum(arrived.sum(), 1)
+   127	    T = sess["acts"].shape[0]
+   128	    live = jnp.arange(T) <= t_c
+   129	    a_ = sess["acts"]
+   130	    def mean_where(v, m):
+   131	        return jnp.sum(jnp.where(m, v, 0)) / jnp.maximum(m.sum(), 1)
+   132	    ksz = jnp.exp(ell)
+   133	    k_int = mean_where(ksz, live & (a_ == ER.INTERACT))
+   134	    k_mov = mean_where(ksz, live & (a_ < 4))
+   135	    k_wait = mean_where(ksz, live & (a_ == ER.WAIT))
+   136	    Xn = X / (jnp.linalg.norm(X, axis=-1, keepdims=True) + 1e-12)
+   137	    En = X[:, KD:] / (jnp.linalg.norm(X[:, KD:], axis=-1, keepdims=True) + 1e-12)
+   138	    l2 = live[1:] & live[:-1]
+   139	    cos_x = mean_where(jnp.sum(Xn[1:] * Xn[:-1], -1), l2)
+   140	    cos_e = mean_where(jnp.sum(En[1:] * En[:-1], -1), l2)
+   141	    sgs = jnp.exp(0.5 * kf["ls"][EP.SLOT])
+   142	
+   143	    def sim(plan, ai):
+   144	        def f(c, a):
+   145	            s, o, e = c
+   146	            e, _ = step_e(kp, e, o, a)
+   147	            yh = M[EP.SLOT] @ (sgs * e[EP.SLOT].reshape(-1))
+   148	            s2, o2, _, _ = ER.env_step(s, a, jnp.array(1), sess["rid"][-1], jnp.array(False), sess["b0"])
+   149	            return (s2, o2, e), yh
+   150	        _, YH = jax.lax.scan(f, (s_end, O[-1], jnp.zeros_like(e) if zt else e), plan)   # zt: probe를 흔적 0에서 시작
+   151	        yh = YH[ai]
+   152	        return (yh @ gB) / (jnp.linalg.norm(yh) * jnp.linalg.norm(gB) + 1e-8), jnp.linalg.norm(yh)
+   153	    sc, nrm = jax.vmap(sim)(plans, ai_all)
+   154	    return sc, nrm, got_mean, k_int, k_mov, k_wait, cos_x, cos_e
+   155	
+   156	
+   157	import functools
+   158	@functools.partial(jax.jit, static_argnames=('zt',))
+   159	def judge_chunk(th, sb, pl, ar, zt=False):
+   160	    return jax.vmap(lambda s, a, b: judge_one(th, s, a, b, zt))(sb, pl, ar)
+   161	
+   162	
+   163	JCH = int(os.environ.get('JCHUNK', 32))
+   164	
+   165	
+   166	def judge(th, zt=False):
+   167	    outs = []
+   168	    for i in range(0, 256, JCH):
+   169	        sl = lambda x: x[i:i + JCH]
+   170	        outs.append(judge_chunk(th, jax.tree_util.tree_map(sl, stack), plans[i:i + JCH], arrive[i:i + JCH], zt))
+   171	    sc, nrm, got, ki, km, kw, cx, ce = [np.concatenate([np.array(o[j]) for o in outs]) for j in range(8)]
+   172	    best = (sc + 1e-9 * np.random.default_rng(0).random(sc.shape)).argmax(1)
+   173	    return dict(b1=float(np.mean(best == b1)), b0=float(np.mean(best == b0)),
+   174	                other=float(np.mean((best != b1) & (best != b0))),
+   175	                written=float(np.mean(got)), read_norm=float(np.mean(nrm)),
+   176	                ksize_interact=float(np.mean(ki)), ksize_move=float(np.mean(km)), ksize_wait=float(np.mean(kw)),
+   177	                cos_addr_neighbor=float(np.mean(cx)), cos_trace_neighbor=float(np.mean(ce)),
+   178	                per_world_b1=(best == b1).astype(int).tolist())
+   179	
+   180	
+   181	def params_summary(th):
+   182	    a = float(alpha(th["kp"]))
+   183	    kf = th["kf"]
+   184	    return dict(alpha=a, half_life=float(-np.log(2) / np.log(a)),
+   185	                sigma2=np.exp(np.array(kf["ls"])).tolist(), R=np.exp(np.array(kf["lr"])).tolist(),
+   186	                q=np.exp(np.array(kf["lq"])).tolist())
+   187	
+   188	
+   189	ZTJ = os.environ.get('ZT_JUDGE')      # 흔적 0 판정: 쉼표로 체크포인트 (start = 12.13 시작 상태). 이어받은 흔적 판정과 나란히.
+   190	if ZTJ:
+   191	    out = {}
+   192	    for ck in ZTJ.split(','):
+   193	        t_ = th if ck == 'start' else (lambda z: {a: {b: jnp.array(z[f"{a}/{b}"]) for b in th[a]} for a in th})(np.load(ck))
+   194	        for zt in (False, True):
+   195	            j = judge(t_, zt)
+   196	            name = f"{ck.split('/')[-1]}|{'zero_trace' if zt else 'carried_trace'}"
+   197	            out[name] = j
+   198	            print(f"[{name}] b1 {j['b1']:.4f} b0 {j['b0']:.4f} other {j['other']:.4f} read_norm {j['read_norm']:.4f}", flush=True)
+   199	    json.dump(out, open(os.environ['OUT'], 'w'))
+   200	    sys.exit(0)
+   201	
+   202	
+   203	DECOMP = os.environ.get('DECOMP')     # 읽기 분해: 쉼표로 체크포인트 (start = 12.13 시작 상태)
+   204	
+   205	
+   206	def decomp_one(th, sess, plans, ai_all):
+   207	    """도착 칸 읽기 ŷ_i = M_T z_i = Σ_t w_t r_t 를 과거 쓰기 스텝별 가중치로 분해.
+   208	    M_{t+1} = M_t A_t + r_t g_tᵀ, A_t = I − z_t g_tᵀ  →  w_t = g_tᵀ u_{t+1}, u_t = A_t u_{t+1}, u_T = z_i."""
+   209	    kp, kf = th["kp"], th["kf"]
+   210	    S_ = EP.SLOT
+   211	    R, Q, sg = jnp.exp(kf["lr"][S_]), jnp.exp(kf["lq"][S_]), jnp.exp(0.5 * kf["ls"][S_])
+   212	    O, s_end, _ = EL.observe_stream(sess)
+   213	    t_c = RU.last_arrival(O)
+   214	    T = sess["acts"].shape[0]
+   215	    # 스텝별 시작 채집처 → 도착 스텝의 채집처
+   216	    s0, _ = EL.env0(sess)
+   217	    change = jnp.arange(T) == sess["change_t"]
+   218	    def fenv(c, x):
+   219	        st, cur = c
+   220	        a, rq, ri, ch = x
+   221	        st2, o2, _, site = ER.env_step(st, a, rq, ri, ch, sess["b0"])
+   222	        cur = jnp.where(site >= 0, site, cur)
+   223	        return (st2, cur), cur
+   224	    _, cur_site = jax.lax.scan(fenv, (s0, jnp.array(-1)), (sess["acts"], sess["req"], sess["rid"], change))
+   225	    blank = ER.TEX[ER.BLANK].reshape(-1)
+   226	    arrived = ~jnp.all(jnp.isclose(O[1:, S_], blank), -1)                       # 쓰기 스텝 t의 목표 o_{t+1}에 도착
+   227	    items = ER.TEX[ER.ITEM0:ER.ITEM0 + 3].reshape(3, -1)
+   228	    item = jnp.argmin(jnp.sum((O[1:, S_][:, None] - items[None]) ** 2, -1), -1)
+   229	    # 도착 칸 쓰기 순서열 (z_t, g_t, r_t)
+   230	    def fw(c, x):
+   231	        Mp, Pp, e = c
+   232	        o, a, o2, t = x
+   233	        e, _ = step_e(kp, e, o, a)
+   234	        mu, _ = wm(o, a)
+   235	        r = (feat(o2) - mu)[S_]
+   236	        Pp = Pp + Q * jnp.eye(DZ)
+   237	        z = sg * e[S_].reshape(-1)
+   238	        err = r - Mp @ z; Pz = Pp @ z; Sv = R + R0 + z @ Pz
+   239	        g = Pz / Sv
+   240	        keep = t > t_c
+   241	        Mn = jnp.where(keep, Mp, Mp + jnp.outer(err, g)); Pn = jnp.where(keep, Pp, Pp - jnp.outer(Pz, Pz) / Sv)
+   242	        return (Mn, Pn, e), (z, jnp.where(keep, 0.0, 1.0) * g, r)
+   243	    c0 = (jnp.zeros((EP.H, DZ)), jnp.eye(DZ), jnp.zeros((EP.NP, NPOLE, KD)))
+   244	    (MT, _, e_end), (Z, G, Rr) = jax.lax.scan(fw, c0, (O[:-1], sess["acts"], O[1:], jnp.arange(T)))
+   245	    def probe_z(plan, ai):
+   246	        def f(c, a):
+   247	            st, o, e = c
+   248	            e, _ = step_e(kp, e, o, a)
+   249	            st2, o2, _, _ = ER.env_step(st, a, jnp.array(1), sess["rid"][-1], jnp.array(False), sess["b0"])
+   250	            return (st2, o2, e), sg * e[S_].reshape(-1)
+   251	        _, Zs = jax.lax.scan(f, (s_end, O[-1], e_end), plan)
+   252	        return Zs[ai]
+   253	    Zq = jax.vmap(probe_z)(plans, ai_all)                                          # [NSITE, DZ]
+   254	    def weights(zq):
+   255	        def fb(u, x):
+   256	            z, g = x
+   257	            w = g @ u
+   258	            return u - z * w, w
+   259	        _, W = jax.lax.scan(fb, zq, (Z, G), reverse=True)
+   260	        return W
+   261	    W = jax.vmap(weights)(Zq)                                                      # [NSITE, T]
+   262	    yh_direct = Zq @ MT.T                                                          # [NSITE, 8]
+   263	    yh_sum = W @ Rr
+   264	    gBn = gB / jnp.linalg.norm(gB)
+   265	    b0, b1 = sess["b0"], sess["b1"]
+   266	    cat = jnp.stack([arrived & (cur_site == b1),
+   267	                     arrived & (cur_site == b0) & (item == 1),
+   268	                     arrived & (cur_site == b0) & (item == 2),
+   269	                     arrived & (cur_site != b0) & (cur_site != b1),
+   270	                     ~arrived], 0)                                               # [5, T]
+   271	    wsum = jnp.einsum('st,ct->sc', W, cat)                                         # [NSITE, 5] 가중치 합
+   272	    bproj = jnp.einsum('st,ct,t->sc', W, cat, Rr @ gBn)                           # [NSITE, 5] B 방향 기여
+   273	    ncnt = cat.sum(1)
+   274	    return wsum, bproj, ncnt, jnp.max(jnp.abs(yh_direct - yh_sum)), yh_direct
+   275	
+   276	
+   277	if DECOMP:
+   278	    CATS = ["b1_arrivals(B)", "b0_arrivals_B", "b0_arrivals_C", "other_site_arrivals", "non_arrival_steps"]
+   279	    dj = jax.jit(jax.vmap(lambda s, a, b, t_: decomp_one(t_, s, a, b), in_axes=(0, 0, 0, None)))
+   280	    out = {}
+   281	    for ck in DECOMP.split(','):
+   282	        if ck == 'start':
+   283	            t_ = th
+   284	        else:
+   285	            z = np.load(ck); t_ = {a: {b: jnp.array(z[f"{a}/{b}"]) for b in th[a]} for a in th}
+   286	        res_ = [dj(jax.tree_util.tree_map(lambda x: x[i:i + JCH], stack), plans[i:i + JCH], arrive[i:i + JCH], t_) for i in range(0, 256, JCH)]
+   287	        wsum, bproj, ncnt, err, yh = [np.concatenate([np.array(r[j]) for r in res_]) for j in range(5)]
+   288	        sc = (yh @ np.array(gB)) / (np.linalg.norm(yh, axis=-1) * np.linalg.norm(np.array(gB)) + 1e-8)
+   289	        best = (sc + 1e-9 * np.random.default_rng(0).random(sc.shape)).argmax(1)
+   290	        ok = best == b1
+   291	        wi = np.arange(256)
+   292	        rep = dict(b1=float(ok.mean()), max_abs_recon_err=float(err.max()), counts_mean=dict(zip(CATS, ncnt.mean(0).round(2).tolist())))
+   293	        for grp, m in [("all", np.ones(256, bool)), ("correct", ok), ("wrong", ~ok)]:
+   294	            for site, idx in [("probe_b1", b1), ("probe_b0", b0)]:
+   295	                rep[f"{grp}/{site}/weight"] = dict(zip(CATS, wsum[wi, idx][m].mean(0).round(4).tolist()))
+   296	                rep[f"{grp}/{site}/Bproj"] = dict(zip(CATS, bproj[wi, idx][m].mean(0).round(5).tolist()))
+   297	            rep[f"{grp}/cosB_b1"] = float(sc[wi, b1][m].mean()); rep[f"{grp}/cosB_b0"] = float(sc[wi, b0][m].mean())
+   298	        out[ck] = rep
+   299	        print(f"== {ck}", json.dumps(rep, ensure_ascii=False, indent=1), flush=True)
+   300	    json.dump(out, open(os.environ.get('OUT'), 'w'), ensure_ascii=False, indent=1)
+   301	    sys.exit(0)
+   302	
+   303	LOAD = os.environ.get('LOAD')        # 체크포인트 판정만: 그대로 / 도착 칸 q만 12.13 값 / 도착 칸 q·σ² 12.13 값
+   304	if LOAD:
+   305	    z = np.load(LOAD)
+   306	    thL = {a: {b: jnp.array(z[f"{a}/{b}"]) for b in th[a]} for a in th}
+   307	    S = EP.SLOT
+   308	    v_q = dict(thL, kf=dict(thL["kf"], lq=thL["kf"]["lq"].at[S].set(np.log(p13["q"][S]))))
+   309	    v_qs = dict(v_q, kf=dict(v_q["kf"], ls=v_q["kf"]["ls"].at[S].set(np.log(p13["sigma2"][S]))))
+   310	    out = {}
+   311	    for name, t_ in [("loaded", thL), ("slot_q_1213", v_q), ("slot_q_sigma2_1213", v_qs)]:
+   312	        j = judge(t_)
+   313	        out[name] = dict(j, slot_q=float(np.exp(t_["kf"]["lq"][S])), slot_sigma2=float(np.exp(t_["kf"]["ls"][S])))
+   314	        print(f"[{name}] b1 {j['b1']:.4f} b0 {j['b0']:.4f} other {j['other']:.4f}  slot q {out[name]['slot_q']:.3g} sigma2 {out[name]['slot_sigma2']:.3g}", flush=True)
+   315	    json.dump(out, open(os.environ.get('OUT', LOAD.replace('.npz', '_qdiag.json')), 'w'))
+   316	    sys.exit(0)
+   317	
+   318	t0 = time.time()
+   319	v0 = float(val_nll(th))
+   320	j0 = judge(th)
+   321	print(f"[start = 12.13 (무작위 키 + 12.13 경험적 베이즈 σ²·R·q)] val_nll {v0:.1f}  b1 {j0['b1']:.4f} b0 {j0['b0']:.4f} other {j0['other']:.4f}  ({time.time()-t0:.0f}s)", flush=True)
+   322	res = dict(spec="cellkey_separate_synapse", R0=R0, before=dict(val_nll=v0, **j0, **params_summary(th)))
+   323	OUT = os.environ.get('OUT', '/workspace/RL-TDP/docs/world/results/synapse_layer_20261117/cellkey.json')
+   324	
+   325	ITERS = int(os.environ.get('ITERS', 2000))
+   326	PAT = int(os.environ.get('PATIENCE', 500))
+   327	JUDGE_EVERY = int(os.environ.get('JUDGE_EVERY', 500))   # 이 반복마다 판정 (b1/b0/다른 곳)
+   328	opt = optax.multi_transform({"kp": optax.adam(1e-3), "kf": optax.adam(0.05)}, {"kp": "kp", "kf": "kf"})
+   329	st = opt.init(th)
+   330	
+   331	
+   332	@jax.jit
+   333	def upd(th, st, idx):
+   334	    def lf(th):
+   335	        sb = jax.tree_util.tree_map(lambda x: x[idx], tr)
+   336	        return jax.vmap(lambda s: sess_nll(th, s))(sb).mean()
+   337	    l, g = jax.value_and_grad(lf)(th)
+   338	    g, st = opt.update(g, st, th)
+   339	    return optax.apply_updates(th, g), st, l
+   340	
+   341	
+   342	curve = [dict(it=0, val_nll=v0)]
+   343	best_v, best_th, best_it = v0, th, 0
+   344	rk = jax.random.PRNGKey(5)
+   345	for it in range(1, ITERS + 1):
+   346	    rk, k = jax.random.split(rk)
+   347	    th, st, l = upd(th, st, jax.random.randint(k, (8,), 0, 1024))
+   348	    if not np.isfinite(float(l)):
+   349	        print("nan at", it, flush=True); break
+   350	    if it % 100 == 0:
+   351	        v = float(val_nll(th))
+   352	        curve.append(dict(it=it, val_nll=v, train_nll=float(l)))
+   353	        if v < best_v:
+   354	            best_v, best_th, best_it = v, th, it
+   355	        print(f"it {it} train {float(l):.1f} val {v:.1f} best {best_v:.1f}@{best_it} half_life {params_summary(th)['half_life']:.2f} ({time.time()-t0:.0f}s)", flush=True)
+   356	        if it % JUDGE_EVERY == 0:
+   357	            jj = judge(th)
+   358	            curve[-1].update(b1=jj["b1"], b0=jj["b0"], other=jj["other"])
+   359	            print(f"  [judge it {it}] b1 {jj['b1']:.4f} b0 {jj['b0']:.4f} other {jj['other']:.4f}", flush=True)
+   360	        if it - best_it >= PAT:
+   361	            print("early stop", flush=True); break
+   362	
+   363	j1 = judge(best_th)
+   364	res.update(after=dict(val_nll=best_v, best_it=best_it, **j1, **params_summary(best_th)), curve=curve,
+   365	           note="train 50000-51023, val 51024-51151, judge 1000-1255; padding with WAIT as stack_sessions")
+   366	print(f"[after] val_nll {best_v:.1f}@{best_it}  b1 {j1['b1']:.4f} b0 {j1['b0']:.4f} other {j1['other']:.4f}", flush=True)
+   367	print(json.dumps({k: v for k, v in res["after"].items() if k != "per_world_b1"}), flush=True)
+   368	json.dump(res, open(OUT, 'w'))
+   369	np.savez(OUT.replace('.json', '_params.npz'), **{f"{a}/{b}": np.array(v) for a in best_th for b, v in best_th[a].items()})
+
+exec
+/bin/bash -lc 'nl -ba scripts/world/diag_20261117/synapse_layer.py' in /workspace/RL-TDP
+ succeeded in 0ms:
+     1	# 명세 1 (docs/world/synapse_layer_spec_basic.md): 12.13 구성에서 키 경로만 학습.
+     2	#   u = w + MLP(w) (마지막 층 0), k̂ = W_k[a] u (초기 = 12.13의 Wr[a]), k = exp(ℓ) k̂/|k̂| (ℓ = 선형([w; onehot a]), 초기 0),
+     3	#   e = α e + k (α = sigmoid(θ_α), 초기 2^(-1/8)), x = [k; e], z_p = σ_p x. 쓰기는 eb_scale.py write() (QN=1) 그대로.
+     4	#   목적: 학습 세계 교사 세션의 순차 예측 NLL (경험적 베이즈). 키 경로 lr 1e-3, 칼만 매개변수 lr 0.05, 배치 8.
+     5	# 환경변수: ITERS (최대 반복, 기본 2000; 0 = 학습 전 판정만), PATIENCE (기본 500), OUT (결과 JSON 경로)
+     6	import sys, os, json, time; sys.path.insert(0, '/workspace/RL-TDP')
+     7	import jax, jax.numpy as jnp, numpy as np, optax
+     8	from rltdp.world import errand as ER, errand_learned as EL, errand_prec as EP, errand_reuse as RU
+     9	
+    10	ER.PUBLIC = False
+    11	We, ybar = EL.emb_fixed(0)
+    12	p, vmax = EP.train("random", seed=0, D=256, iters_k=0, log=lambda m: None)
+    13	feat, wm, _ = EP.parts(p, We, ybar, "random")
+    14	KD, NPOLE = EP.DK, 2
+    15	DZ = NPOLE * KD
+    16	DW = 9 * EP.H
+    17	phi = (ER.TEX[ER.ITEM0:ER.ITEM0 + 3].reshape(3, -1) @ We) - ybar
+    18	gB = phi[1] - phi.mean(0)
+    19	LOG1213 = '/workspace/RL-TDP/docs/world/results/errand_diag_20261115b/eb_process_noise.log'
+    20	p13 = json.loads(open(LOG1213).read().strip().splitlines()[-1])
+    21	
+    22	# ---- 매개변수: 키 경로 (kp)와 칼만 (kf)
+    23	kr = jax.random.split(jax.random.PRNGKey(11), 2)
+    24	kp = dict(W1=jax.random.normal(kr[0], (DW, 128)) / np.sqrt(DW), b1=jnp.zeros(128),
+    25	          W2=jnp.zeros((128, DW)), b2=jnp.zeros(DW),
+    26	          Wk=jnp.array(p["Wr"]),                                   # [NA, 128, 72], 12.13의 난수 키
+    27	          lw=jnp.zeros(DW + ER.NA), lb=jnp.zeros(()),
+    28	          ta=jnp.array(np.log(2.0 ** (-1 / 8) / (1 - 2.0 ** (-1 / 8)))))
+    29	kf = dict(ls=jnp.log(jnp.array(p13["sigma2"])), lr=jnp.log(jnp.array(p13["R"])), lq=jnp.log(jnp.array(p13["q"])))
+    30	th = dict(kp=kp, kf=kf)
+    31	
+    32	
+    33	def key_fn(kp, o, a):
+    34	    w = feat(o)[:9].reshape(-1)
+    35	    u = w + jax.nn.silu(w @ kp["W1"] + kp["b1"]) @ kp["W2"] + kp["b2"]
+    36	    kh = kp["Wk"][a] @ u
+    37	    ell = jnp.concatenate([w, jax.nn.one_hot(a, ER.NA)]) @ kp["lw"] + kp["lb"]
+    38	    return jnp.exp(ell) * kh / (jnp.linalg.norm(kh) + 1e-8), ell
+    39	
+    40	
+    41	def alpha(kp):
+    42	    return jax.nn.sigmoid(kp["ta"])
+    43	
+    44	
+    45	def step_e(kp, e, o, a):
+    46	    k, ell = key_fn(kp, o, a)
+    47	    e = jnp.stack([k, alpha(kp) * e[1] + k])                    # 극 {0, 반감기 학습}: [지금 키; 흔적]
+    48	    return e, ell
+    49	
+    50	
+    51	def write(th, O, acts, stop_t):
+    52	    kp, kf = th["kp"], th["kf"]
+    53	    R, Q, sg = jnp.exp(kf["lr"]), jnp.exp(kf["lq"]), jnp.exp(0.5 * kf["ls"])
+    54	
+    55	    @jax.checkpoint
+    56	    def f(c, x):
+    57	        M, P, e = c
+    58	        o, a, o2, t = x
+    59	        e, ell = step_e(kp, e, o, a)
+    60	        mu, _ = wm(o, a)
+    61	        r = feat(o2) - mu
+    62	
+    63	        def pp(Mp, Pp, sp, rp, Rp, Qp):
+    64	            Pp = Pp + Qp * jnp.eye(DZ)
+    65	            z = sp * e.reshape(-1)
+    66	            err = rp - Mp @ z; Pz = Pp @ z; S = Rp + z @ Pz
+    67	            M2 = Mp + jnp.outer(err, Pz) / S
+    68	            got = (M2 @ z) @ rp / (rp @ rp + 1e-12)
+    69	            return M2, Pp - jnp.outer(Pz, Pz) / S, 0.5 * (err @ err / S + EP.H * jnp.log(S)), got
+    70	        M2, P2, nll, got = jax.vmap(pp)(M, P, sg, r, R, Q)
+    71	        keep = t > stop_t
+    72	        return (jnp.where(keep, M, M2), jnp.where(keep, P, P2), e), (jnp.where(keep, 0.0, nll.sum()), got[EP.SLOT], ell, e.reshape(-1))
+    73	    c0 = (jnp.zeros((EP.NP, EP.H, DZ)), jnp.tile(jnp.eye(DZ), (EP.NP, 1, 1)), jnp.zeros((NPOLE, KD)))
+    74	    return jax.lax.scan(f, c0, (O[:-1], acts, O[1:], jnp.arange(acts.shape[0])))
+    75	
+    76	
+    77	def sess_nll(th, sess):
+    78	    O, _, _ = EL.observe_stream(sess)
+    79	    _, (nll, _, _, _) = write(th, O, sess["acts"], 10 ** 9)
+    80	    return nll.sum()
+    81	
+    82	
+    83	# ---- 자료
+    84	_, tr = EL.stack_sessions(range(50_000, 51_024), 256)
+    85	_, va = EL.stack_sessions(range(51_024, 51_152), 256)
+    86	print("lengths: train", tr["acts"].shape, "val", va["acts"].shape, flush=True)
+    87	
+    88	
+    89	@jax.jit
+    90	def val_nll(th):
+    91	    def chunk(c, idx):
+    92	        sb = jax.tree_util.tree_map(lambda x: jax.lax.dynamic_slice_in_dim(x, idx, 16), va)
+    93	        return c + jax.vmap(lambda s: sess_nll(th, s))(sb).sum(), None
+    94	    tot, _ = jax.lax.scan(chunk, 0.0, jnp.arange(0, 128, 16))
+    95	    return tot / 128
+    96	
+    97	
+    98	# ---- 판정 (eb_scale.py와 같음, 키·흔적만 학습된 식)
+    99	sessions, stack = EL.stack_sessions(range(1000, 1256), 256)
+   100	plans, arrive = EL.plans_for(sessions)
+   101	b1, b0 = np.array(stack["b1"]), np.array(stack["b0"])
+   102	
+   103	
+   104	def judge_one(th, sess, plans, ai_all):
+   105	    kp, kf = th["kp"], th["kf"]
+   106	    O, s_end, _ = EL.observe_stream(sess)
+   107	    t_c = RU.last_arrival(O)
+   108	    Y = jax.vmap(feat)(O[1:])[:, EP.SLOT]
+   109	    blank = feat(ER.TEX[jnp.full(12, ER.BLANK)].reshape(12, -1))[EP.SLOT]
+   110	    arrived = ~jnp.all(jnp.isclose(Y, blank, atol=1e-5), -1)
+   111	    (M, P, e), (_, got, ell, X) = write(th, O, sess["acts"], t_c)
+   112	    got_mean = jnp.sum(jnp.where(arrived, got, 0)) / jnp.maximum(arrived.sum(), 1)
+   113	    T = sess["acts"].shape[0]
+   114	    live = jnp.arange(T) <= t_c
+   115	    a_ = sess["acts"]
+   116	    def mean_where(v, m):
+   117	        return jnp.sum(jnp.where(m, v, 0)) / jnp.maximum(m.sum(), 1)
+   118	    ksz = jnp.exp(ell)
+   119	    k_int = mean_where(ksz, live & (a_ == ER.INTERACT))
+   120	    k_mov = mean_where(ksz, live & (a_ < 4))
+   121	    k_wait = mean_where(ksz, live & (a_ == ER.WAIT))
+   122	    Xn = X / (jnp.linalg.norm(X, axis=-1, keepdims=True) + 1e-12)
+   123	    En = X[:, KD:] / (jnp.linalg.norm(X[:, KD:], axis=-1, keepdims=True) + 1e-12)
+   124	    l2 = live[1:] & live[:-1]
+   125	    cos_x = mean_where(jnp.sum(Xn[1:] * Xn[:-1], -1), l2)
+   126	    cos_e = mean_where(jnp.sum(En[1:] * En[:-1], -1), l2)
+   127	    sgs = jnp.exp(0.5 * kf["ls"][EP.SLOT])
+   128	
+   129	    def sim(plan, ai):
+   130	        def f(c, a):
+   131	            s, o, e = c
+   132	            e, _ = step_e(kp, e, o, a)
+   133	            yh = M[EP.SLOT] @ (sgs * e.reshape(-1))
+   134	            s2, o2, _, _ = ER.env_step(s, a, jnp.array(1), sess["rid"][-1], jnp.array(False), sess["b0"])
+   135	            return (s2, o2, e), yh
+   136	        _, YH = jax.lax.scan(f, (s_end, O[-1], e), plan)
+   137	        yh = YH[ai]
+   138	        return (yh @ gB) / (jnp.linalg.norm(yh) * jnp.linalg.norm(gB) + 1e-8), jnp.linalg.norm(yh)
+   139	    sc, nrm = jax.vmap(sim)(plans, ai_all)
+   140	    return sc, nrm, got_mean, k_int, k_mov, k_wait, cos_x, cos_e
+   141	
+   142	
+   143	@jax.jit
+   144	def judge_chunk(th, sb, pl, ar):
+   145	    return jax.vmap(lambda s, a, b: judge_one(th, s, a, b))(sb, pl, ar)
+   146	
+   147	
+   148	def judge(th):
+   149	    outs = []
+   150	    for i in range(0, 256, 32):
+   151	        sl = lambda x: x[i:i + 32]
+   152	        outs.append(judge_chunk(th, jax.tree_util.tree_map(sl, stack), plans[i:i + 32], arrive[i:i + 32]))
+   153	    sc, nrm, got, ki, km, kw, cx, ce = [np.concatenate([np.array(o[j]) for o in outs]) for j in range(8)]
+   154	    best = (sc + 1e-9 * np.random.default_rng(0).random(sc.shape)).argmax(1)
+   155	    return dict(b1=float(np.mean(best == b1)), b0=float(np.mean(best == b0)),
+   156	                other=float(np.mean((best != b1) & (best != b0))),
+   157	                written=float(np.mean(got)), read_norm=float(np.mean(nrm)),
+   158	                ksize_interact=float(np.mean(ki)), ksize_move=float(np.mean(km)), ksize_wait=float(np.mean(kw)),
+   159	                cos_addr_neighbor=float(np.mean(cx)), cos_trace_neighbor=float(np.mean(ce)),
+   160	                per_world_b1=(best == b1).astype(int).tolist())
+   161	
+   162	
+   163	def params_summary(th):
+   164	    a = float(alpha(th["kp"]))
+   165	    kf = th["kf"]
+   166	    return dict(alpha=a, half_life=float(-np.log(2) / np.log(a)),
+   167	                sigma2=np.exp(np.array(kf["ls"])).tolist(), R=np.exp(np.array(kf["lr"])).tolist(),
+   168	                q=np.exp(np.array(kf["lq"])).tolist())
+   169	
+   170	
+   171	t0 = time.time()
+   172	v0 = float(val_nll(th))
+   173	j0 = judge(th)
+   174	print(f"[start = 12.13 (무작위 키 + 12.13 경험적 베이즈 σ²·R·q)] val_nll {v0:.1f}  b1 {j0['b1']:.4f} b0 {j0['b0']:.4f} other {j0['other']:.4f}  ({time.time()-t0:.0f}s)", flush=True)
+   175	res = dict(spec="synapse_layer_spec_basic", before=dict(val_nll=v0, **j0, **params_summary(th)))
+   176	OUT = os.environ.get('OUT', '/workspace/RL-TDP/docs/world/results/synapse_layer_20261117/spec1.json')
+   177	
+   178	ITERS = int(os.environ.get('ITERS', 2000))
+   179	PAT = int(os.environ.get('PATIENCE', 500))
+   180	JUDGE_EVERY = int(os.environ.get('JUDGE_EVERY', 500))   # 이 반복마다 판정 (b1/b0/다른 곳)
+   181	opt = optax.multi_transform({"kp": optax.adam(1e-3), "kf": optax.adam(0.05)}, {"kp": "kp", "kf": "kf"})
+   182	st = opt.init(th)
+   183	
+   184	
+   185	@jax.jit
+   186	def upd(th, st, idx):
+   187	    def lf(th):
+   188	        sb = jax.tree_util.tree_map(lambda x: x[idx], tr)
+   189	        return jax.vmap(lambda s: sess_nll(th, s))(sb).mean()
+   190	    l, g = jax.value_and_grad(lf)(th)
+   191	    g, st = opt.update(g, st, th)
+   192	    return optax.apply_updates(th, g), st, l
+   193	
+   194	
+   195	curve = [dict(it=0, val_nll=v0)]
+   196	best_v, best_th, best_it = v0, th, 0
+   197	rk = jax.random.PRNGKey(5)
+   198	for it in range(1, ITERS + 1):
+   199	    rk, k = jax.random.split(rk)
+   200	    th, st, l = upd(th, st, jax.random.randint(k, (8,), 0, 1024))
+   201	    if not np.isfinite(float(l)):
+   202	        print("nan at", it, flush=True); break
+   203	    if it % 100 == 0:
+   204	        v = float(val_nll(th))
+   205	        curve.append(dict(it=it, val_nll=v, train_nll=float(l)))
+   206	        if v < best_v:
+   207	            best_v, best_th, best_it = v, th, it
+   208	        print(f"it {it} train {float(l):.1f} val {v:.1f} best {best_v:.1f}@{best_it} half_life {params_summary(th)['half_life']:.2f} ({time.time()-t0:.0f}s)", flush=True)
+   209	        if it % JUDGE_EVERY == 0:
+   210	            jj = judge(th)
+   211	            curve[-1].update(b1=jj["b1"], b0=jj["b0"], other=jj["other"])
+   212	            print(f"  [judge it {it}] b1 {jj['b1']:.4f} b0 {jj['b0']:.4f} other {jj['other']:.4f}", flush=True)
+   213	        if it - best_it >= PAT:
+   214	            print("early stop", flush=True); break
+   215	
+   216	j1 = judge(best_th)
+   217	res.update(after=dict(val_nll=best_v, best_it=best_it, **j1, **params_summary(best_th)), curve=curve,
+   218	           note="train 50000-51023, val 51024-51151, judge 1000-1255; padding with WAIT as stack_sessions")
+   219	print(f"[after] val_nll {best_v:.1f}@{best_it}  b1 {j1['b1']:.4f} b0 {j1['b0']:.4f} other {j1['other']:.4f}", flush=True)
+   220	print(json.dumps({k: v for k, v in res["after"].items() if k != "per_world_b1"}), flush=True)
+   221	json.dump(res, open(OUT, 'w'))
+   222	np.savez(OUT.replace('.json', '_params.npz'), **{f"{a}/{b}": np.array(v) for a in best_th for b, v in best_th[a].items()})
+
+exec
+/bin/bash -lc "nl -ba scripts/world/diag_20261115/eb_scale.py | sed -n '1,300p'" in /workspace/RL-TDP
+ succeeded in 0ms:
+     1	# 쓰기 스케일을 표준형 (베이즈 선형 회귀 / 칼만)으로: 칸 p마다 y_p − μ_p = M_p z + ε,
+     2	#   z = σ_p [e; k] (사전 M ~ N(0, I) → 기억 몫의 사전 분산 σ_p² |[e; k]|²), ε ~ N(0, R_p).
+     3	#   σ_p², R_p는 칸별 상수, 학습 세계의 교사 세션에서 순차 예측 우도 (= 주변 우도, 경험적 베이즈)를 최대로 맞춤.
+     4	#   12.7과 같은 판정 (난수 키, 주소 [e; k], C 도착 뒤 쓰기 없음, 시드 1, 세계 256개).
+     5	# 환경변수 POLES (흔적 극의 반감기, 쉼표, 0 = 지금 키; 기본 0,8 = 12.7의 [k; e]), KD (키 차원, 기본 128; 앞 KD성분을 다시 정규화).
+     6	# argv: [mode]  const = 칸별 상수 σ_p (기본) / wm = σ_p(o, a) = c_p √v_p(o, a) (월드 모델 분산 × 칸별 상수)
+     7	#               net = σ_p(x) = exp(½ f_p(x)), f: 주소 x → 12, 은닉 64 SiLU (docs/world/sigma_x_predictions.md). SAVE=경로면 맞춘 매개변수 저장
+     8	import sys, json; sys.path.insert(0, '/workspace/RL-TDP')
+     9	import jax, jax.numpy as jnp, numpy as np, optax
+    10	from rltdp.world import errand as ER, errand_learned as EL, errand_prec as EP, errand_reuse as RU
+    11	MODE = sys.argv[1] if len(sys.argv) > 1 else "const"
+    12	ER.PUBLIC = False
+    13	We, ybar = EL.emb_fixed(0)
+    14	p, vmax = EP.train("random", seed=0, D=256, iters_k=0, log=lambda m: None)
+    15	feat, wm, key = EP.parts(p, We, ybar, "random")
+    16	import os
+    17	HL = [float(x) for x in os.environ.get('POLES', '0,8').split(',')]
+    18	AL = jnp.array([0.0 if x == 0 else 2.0 ** (-1 / x) for x in HL])
+    19	KD = int(os.environ.get('KD', EP.DK))
+    20	DZ = len(HL) * KD
+    21	key0 = key
+    22	def key(o, a):
+    23	    k = key0(o, a)[:KD]
+    24	    return k / (jnp.linalg.norm(k) + 1e-8)
+    25	phi = (ER.TEX[ER.ITEM0:ER.ITEM0 + 3].reshape(3, -1) @ We) - ybar
+    26	gB = phi[1] - phi.mean(0)
+    27	
+    28	
+    29	def sig(h, o, a, x):
+    30	    if MODE == "net":
+    31	        n = h["net"]
+    32	        return jnp.exp(0.5 * (jax.nn.silu(x @ n["W1"] + n["b1"]) @ n["W2"] + n["b2"]))
+    33	    if MODE == "wm":
+    34	        _, lv = wm(o, a)
+    35	        return jnp.exp(0.5 * (h["ls"] + lv))
+    36	    return jnp.exp(0.5 * h["ls"])
+    37	
+    38	
+    39	FORGET = os.environ.get('FORGET', 'add')   # add = 12.13 (P ← P + qI) / mult = 곱하는 망각 (HANDOVER 0.2절)
+    40	
+    41	
+    42	def write_mult(h, O, acts, stop_t):
+    43	    # 정보형 곱하는 망각, 칸별 λ_p: H ← λH + zzᵀ/R, G ← λG + r zᵀ/R, M = G (H + I)⁻¹. 사전 N(0, I)는 감쇠하지 않음.
+    44	    # 예측 (주변 우도)은 감쇠 뒤·쓰기 전: 평균 G' u, 분산 R + zᵀu, u = (λH + I)⁻¹ z. 모두 누적합 꼴 (구현은 순차 scan).
+    45	    # 구현: 제곱근 공분산형, float32. P = (H + I)⁻¹ = S Sᵀ (S 정사각)와 M을 들고 감.
+    46	    #   감쇠 (H ← λH, G ← λG): C = λI + (1−λ)SᵀS (고유값 ∈ [λ, 1]), C = LLᵀ, S ← S L⁻ᵀ, M ← M − (1−λ) M S C⁻¹ Sᵀ (= λ M (λI + (1−λ)P)⁻¹, Woodbury).
+    47	    #   쓰기 (H += zzᵀ/R, G += rzᵀ/R): Potter. f = Sᵀz, α = 1/(R + |f|²), γ = 1/(1 + √(αR)), K = α S f, M += err Kᵀ, S ← S − γ K fᵀ.
+    48	    #   예측: 평균 M z, 분산 R + |Sᵀz|² (구조상 > 0).
+    49	    #   이유: 곱하는 망각은 P에 바닥이 없어 (정상 상태 분산 ≈ (1−λ)R/|z|², 지도 칸 ~1e-8) float32 정밀도 밑으로 내려감.
+    50	    #   정보형·공분산형 모두 it 100에서 S < 0 → NaN (P 최소 고유값 음수, 학습 세계 50/256). QR 기반 제곱근형 (SRIF)은 정확하지만 GPU에서 너무 느림.
+    51	    R = jnp.exp(h["lr"])
+    52	    lam = jax.nn.sigmoid(h["lt"])                   # λ_p ∈ (0, 1)
+    53	    I = jnp.eye(DZ)
+    54	
+    55	    @jax.checkpoint
+    56	    def f(c, x):
+    57	        M, S, e = c
+    58	        o, a, o2, t = x
+    59	        k = key(o, a)
+    60	        e = AL[:, None] * e + k
+    61	        mu, _ = wm(o, a)
+    62	        s = sig(h, o, a, e.reshape(-1))
+    63	        r = feat(o2) - mu
+    64	
+    65	        def pp(Mp, Sp, sp, rp, Rp, lp):
+    66	            z = sp * e.reshape(-1)
+    67	            Mp, Sp, err, Sv = mult_step(Mp, Sp, z, rp, Rp, lp)
+    68	            got = (Mp @ z) @ rp / (rp @ rp + 1e-12)
+    69	            return Mp, Sp, 0.5 * (err @ err / Sv + EP.H * jnp.log(Sv)), got
+    70	        M2, S2, nll, got = jax.vmap(pp)(M, S, s, r, R, lam)
+    71	        keep = t > stop_t
+    72	        return (jnp.where(keep, M, M2), jnp.where(keep, S, S2), e), (jnp.where(keep, 0.0, nll.sum()), got[EP.SLOT])
+    73	    c0 = (jnp.zeros((EP.NP, EP.H, DZ)), jnp.tile(I, (EP.NP, 1, 1)), jnp.zeros((len(HL), KD)))
+    74	    with jax.default_matmul_precision("highest"):
+    75	        (M, S, e), ys = jax.lax.scan(f, c0, (O[:-1], acts, O[1:], jnp.arange(acts.shape[0])))
+    76	        P = jnp.einsum('pij,pkj->pik', S, S)
+    77	    return (M, P, e), ys
+    78	
+    79	
+    80	def mult_step(M, S, z, r, Rp, lp):
+    81	    """곱하는 망각 한 스텝 (감쇠 뒤 예측, 그다음 쓰기). 반환: M2, S2, 예측 오차, 예측 분산."""
+    82	    D = S.shape[0]
+    83	    C = lp * jnp.eye(D) + (1 - lp) * (S.T @ S)
+    84	    L = jnp.linalg.cholesky(C)
+    85	    Ci_St = jax.scipy.linalg.cho_solve((L, True), S.T)                 # C⁻¹ Sᵀ
+    86	    M = M - (1 - lp) * (M @ S) @ Ci_St
+    87	    S = jax.scipy.linalg.solve_triangular(L, S.T, lower=True).T         # S L⁻ᵀ
+    88	    fv = S.T @ z; Sv = Rp + fv @ fv
+    89	    err = r - M @ z
+    90	    al = 1.0 / Sv; ga = 1.0 / (1.0 + jnp.sqrt(al * Rp))
+    91	    K = al * (S @ fv)
+    92	    return M + jnp.outer(err, K), S - ga * jnp.outer(K, fv), err, Sv
+    93	
+    94	
+    95	def write(h, O, acts, stop_t):
+    96	    if FORGET == 'mult':
+    97	        return write_mult(h, O, acts, stop_t)
+    98	    R = jnp.exp(h["lr"])
+    99	    Q = jnp.exp(h["lq"]) if "lq" in h else jnp.zeros(EP.NP)          # 과정 잡음 (칸별 q_p I): 매 스텝 P ← P + q_p I
+   100	
+   101	    @jax.checkpoint
+   102	    def f(c, x):
+   103	        M, P, e = c
+   104	        o, a, o2, t = x
+   105	        k = key(o, a)
+   106	        e = AL[:, None] * e + k
+   107	        mu, _ = wm(o, a)
+   108	        s = sig(h, o, a, e.reshape(-1))
+   109	        r = feat(o2) - mu
+   110	
+   111	        def pp(Mp, Pp, sp, rp, Rp, Qp):
+   112	            Pp = Pp + Qp * jnp.eye(Pp.shape[0])
+   113	            z = sp * e.reshape(-1)
+   114	            err = rp - Mp @ z; Pz = Pp @ z; S = Rp + z @ Pz
+   115	            M2 = Mp + jnp.outer(err, Pz) / S
+   116	            got = (M2 @ z) @ rp / (rp @ rp + 1e-12)
+   117	            return M2, Pp - jnp.outer(Pz, Pz) / S, 0.5 * (err @ err / S + EP.H * jnp.log(S)), got
+   118	        M2, P2, nll, got = jax.vmap(pp)(M, P, s, r, R, Q)
+   119	        keep = t > stop_t
+   120	        return (jnp.where(keep, M, M2), jnp.where(keep, P, P2), e), (jnp.where(keep, 0.0, nll.sum()), got[EP.SLOT])
+   121	    c0 = (jnp.zeros((EP.NP, EP.H, DZ)), jnp.tile(jnp.eye(DZ), (EP.NP, 1, 1)), jnp.zeros((len(HL), KD)))
+   122	    return jax.lax.scan(f, c0, (O[:-1], acts, O[1:], jnp.arange(acts.shape[0])))
+   123	
+   124	
+   125	# ---- 경험적 베이즈: 학습 세계의 교사 세션 전체의 순차 예측 NLL
+   126	_, tr = EL.stack_sessions(range(50_000, 50_000 + 256), 256)
+   127	h = dict(ls=jnp.zeros(EP.NP), lr=jnp.full(EP.NP, jnp.log(0.01)))
+   128	if MODE == "net":
+   129	    h.pop("ls")
+   130	    h["net"] = dict(W1=jax.random.normal(jax.random.PRNGKey(7), (DZ, 64)) / np.sqrt(DZ), b1=jnp.zeros(64),
+   131	                    W2=jnp.zeros((64, EP.NP)), b2=jnp.zeros(EP.NP))       # 출력 0 → 처음 σ² = 1 (ls = 0과 같음)
+   132	if os.environ.get('QN', '0') == '1':
+   133	    h['lq'] = jnp.full(EP.NP, jnp.log(1e-3))
+   134	if FORGET == 'mult':
+   135	    h['lt'] = jnp.full(EP.NP, jnp.log((1 - 1e-3) / 1e-3))   # λ_p = sigmoid(lt), 초기 1 − λ = 1e-3 (q 초기값 자리 그대로)
+   136	# HFROM = 기록 파일 (마지막 줄 JSON)의 σ², R을 그대로 쓰고 맞추지 않음 (12.13 분해: q = 0)
+   137	HFROM = os.environ.get('HFROM')
+   138	if HFROM:
+   139	    prev = json.loads(open(HFROM).read().strip().splitlines()[-1])
+   140	    h = dict(ls=jnp.log(jnp.array(prev["sigma2"])), lr=jnp.log(jnp.array(prev["R"])))
+   141	if MODE == "net" and os.environ.get('INIT1213') == '1':                    # 출발점 = 12.13 (상수 σ, R, q)
+   142	    p13 = json.loads(open('/workspace/RL-TDP/docs/world/results/errand_diag_20261115b/eb_process_noise.log').read().strip().splitlines()[-1])
+   143	    h["net"]["b2"] = jnp.log(jnp.array(p13["sigma2"])); h["lr"] = jnp.log(jnp.array(p13["R"])); h["lq"] = jnp.log(jnp.array(p13["q"]))
+   144	ITERS = int(os.environ.get('ITERS', 200))
+   145	opt = optax.adam(float(os.environ.get('LR', 0.05)))
+   146	st = opt.init(h)
+   147	
+   148	
+   149	@jax.jit
+   150	def upd(h, st, idx):
+   151	    def lf(h):
+   152	        sb = jax.tree_util.tree_map(lambda x: x[idx], tr)
+   153	        def one(sess):
+   154	            O, _, _ = EL.observe_stream(sess)
+   155	            _, (nll, _) = write(h, O, sess["acts"], 10 ** 9)
+   156	            return nll.sum()
+   157	        return jax.vmap(one)(sb).mean()
+   158	    l, g = jax.value_and_grad(lf)(h)
+   159	    g, st = opt.update(g, st, h)
+   160	    return optax.apply_updates(h, g), st, l
+   161	
+   162	
+   163	rk = jax.random.PRNGKey(5)
+   164	for it in range(0 if HFROM else ITERS):
+   165	    rk, k = jax.random.split(rk)
+   166	    h, st, l = upd(h, st, jax.random.randint(k, (8,), 0, 256))
+   167	    if it % 25 == 0 or it == ITERS - 1:
+   168	        print(f"[EB {MODE}] it {it} nll {float(l):.1f}", flush=True)
+   169	        if not np.isfinite(float(l)):
+   170	            print("nan: stop", {k: (np.array(v).round(3).tolist() if not isinstance(v, dict) else "net") for k, v in h.items()}, flush=True); sys.exit(1)
+   171	print("sigma^2_p", np.round(np.exp(np.array(h["ls"])), 4).tolist() if "ls" in h else "net")
+   172	# 성립 확인: 학습 세계 64개 고정 집합의 전체 NLL (이 h 대 12.13 상수)
+   173	@jax.jit
+   174	def full_nll(hh, sb):
+   175	    def one_(sess):
+   176	        O, _, _ = EL.observe_stream(sess)
+   177	        _, (nll, _) = write(hh, O, sess["acts"], 10 ** 9)
+   178	        return nll.sum()
+   179	    return jax.vmap(one_)(sb).sum()
+   180	fixed64 = jax.tree_util.tree_map(lambda x: x[:64], tr)
+   181	NLL_FIT = float(full_nll(h, fixed64))
+   182	NLL_1213 = None
+   183	if MODE == "net":
+   184	    p13 = json.loads(open('/workspace/RL-TDP/docs/world/results/errand_diag_20261115b/eb_process_noise.log').read().strip().splitlines()[-1])
+   185	    h13 = dict(lr=jnp.log(jnp.array(p13["R"])), lq=jnp.log(jnp.array(p13["q"])),
+   186	               net=dict(h["net"], W2=jnp.zeros_like(h["net"]["W2"]), b2=jnp.log(jnp.array(p13["sigma2"]))))
+   187	    NLL_1213 = float(full_nll(h13, fixed64))
+   188	print("full NLL (64 training worlds): fit", NLL_FIT, " 12.13 constant", NLL_1213, flush=True)
+   189	if os.environ.get('SAVE'):
+   190	    flat = {f"{k}/{kk}" if isinstance(v, dict) else k: np.array(vv if isinstance(v, dict) else v)
+   191	            for k, v in h.items() for kk, vv in (v.items() if isinstance(v, dict) else [(None, v)])}
+   192	    np.savez(os.environ['SAVE'], **flat)
+   193	print("q_p      ", np.round(np.exp(np.array(h["lq"])), 6).tolist() if "lq" in h else None)
+   194	print("R_p      ", np.round(np.exp(np.array(h["lr"])), 5).tolist(), flush=True)
+   195	if "lt" in h:
+   196	    print("1-lambda_p", np.array(jax.nn.sigmoid(-h["lt"])).tolist())
+   197	    print("window    ", np.round(1 / np.array(jax.nn.sigmoid(-h["lt"])), 1).tolist(), flush=True)
+   198	
+   199	# ---- 판정 (12.7과 같음)
+   200	sessions, stack = EL.stack_sessions(range(1000, 1256), 256)
+   201	plans, arrive = EL.plans_for(sessions)
+   202	b1, b0 = np.array(stack["b1"]), np.array(stack["b0"])
+   203	
+   204	
+   205	def one(sess, plans, ai_all):
+   206	    O, s_end, _ = EL.observe_stream(sess)
+   207	    t_c = RU.last_arrival(O)
+   208	    Y = jax.vmap(feat)(O[1:])[:, EP.SLOT]
+   209	    blank = feat(ER.TEX[jnp.full(12, ER.BLANK)].reshape(12, -1))[EP.SLOT]
+   210	    arrived = ~jnp.all(jnp.isclose(Y, blank, atol=1e-5), -1)
+   211	    (M, P, e), (_, got) = write(h, O, sess["acts"], t_c)
+   212	
+   213	    def fx(e_, inp):
+   214	        o_, a_ = inp
+   215	        e_ = AL[:, None] * e_ + key(o_, a_)
+   216	        return e_, sig(h, o_, a_, e_.reshape(-1))[EP.SLOT] ** 2
+   217	    _, s2 = jax.lax.scan(fx, jnp.zeros((len(HL), KD)), (O[:-1], sess["acts"]))
+   218	    s2_arr = jnp.sum(jnp.where(arrived, s2, 0)) / jnp.maximum(arrived.sum(), 1)
+   219	    s2_not = jnp.sum(jnp.where(~arrived, s2, 0)) / jnp.maximum((~arrived).sum(), 1)
+   220	    got_mean = jnp.sum(jnp.where(arrived, got, 0)) / jnp.maximum(arrived.sum(), 1)
+   221	
+   222	    def sim(plan, ai):
+   223	        def f(c, a):
+   224	            s, o, e = c
+   225	            k = key(o, a)
+   226	            e = AL[:, None] * e + k
+   227	            yh = M[EP.SLOT] @ (sig(h, o, a, e.reshape(-1))[EP.SLOT] * e.reshape(-1))
+   228	            s2, o2, _, _ = ER.env_step(s, a, jnp.array(1), sess["rid"][-1], jnp.array(False), sess["b0"])
+   229	            return (s2, o2, e), yh
+   230	        _, YH = jax.lax.scan(f, (s_end, O[-1], e), plan)
+   231	        yh = YH[ai]
+   232	        return (yh @ gB) / (jnp.linalg.norm(yh) * jnp.linalg.norm(gB) + 1e-8), jnp.linalg.norm(yh)
+   233	    sc, nrm = jax.vmap(sim)(plans, ai_all)
+   234	    return sc, nrm, got_mean, s2_arr, s2_not
+   235	
+   236	
+   237	sc, nrm, got, s2a, s2n = jax.jit(jax.vmap(one))(stack, plans, arrive)
+   238	x = np.array(sc)
+   239	best = (x + 1e-9 * np.random.default_rng(0).random(x.shape)).argmax(1)
+   240	res = dict(mode=MODE, poles=HL, kd=KD, sigma2=(np.exp(np.array(h["ls"])).tolist() if "ls" in h else None),
+   241	           nll64_fit=NLL_FIT, nll64_1213=NLL_1213, iters=ITERS,
+   242	           slot_sigma2_arrival=float(np.mean(s2a)), slot_sigma2_other=float(np.mean(s2n)), R=np.exp(np.array(h["lr"])).tolist(), q=(np.exp(np.array(h["lq"])).tolist() if "lq" in h else None),
+   243	           forget=FORGET, hfrom=HFROM,
+   244	           one_minus_lam=(np.array(jax.nn.sigmoid(-h["lt"])).tolist() if "lt" in h else None),
+   245	           window=((1 / np.array(jax.nn.sigmoid(-h["lt"]))).tolist() if "lt" in h else None),
+   246	           b1=float(np.mean(best == b1)), b0=float(np.mean(best == b0)), other=float(np.mean((best != b1) & (best != b0))),
+   247	           written=float(np.mean(got)), read_norm=float(np.mean(nrm)))
+   248	print(json.dumps(res), flush=True)
+
