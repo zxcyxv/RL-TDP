@@ -11,6 +11,7 @@ import sys, os, json, time; sys.path.insert(0, '/workspace/RL-TDP')
 import os as _os
 import jax
 FREEZE_KEYS = _os.environ.get('FREEZE_KEYS', '0') == '1'   # 1: 키 경로 고정 (12.13처럼 칼만 매개변수만 경험적 베이즈)
+DIAGP = _os.environ.get('DIAGP', '0') == '1'      # 대각 공분산 (KDN식)
 SQRTKF = _os.environ.get('SQRTKF', '0') == '1'   # Codex ①: 칼만 공분산을 제곱근형 (P = S Sᵀ)으로. 식은 그대로
 KF64 = _os.environ.get('KF64', '0') == '1'      # Codex ①: 칼만 상태 (M, P)와 그 갱신만 float64. 식·목적·매개변수는 그대로
 import jax.numpy as jnp, numpy as np, optax
@@ -115,6 +116,18 @@ def write(th, O, acts, stop_t):
             got = (M2 @ z) @ rp / (rp @ rp + 1e-12)
             return M2, Sp - ga * jnp.outer(K, fv), 0.5 * (err @ err / Sv + EP.H * jnp.log(Sv)), got
 
+        def pp_diag(Mp, pd, sp, rp, Rp, Qp, ep):
+            # 대각 공분산 (KDN식 평균장 투영): P = diag(p). 예측 분산 ρ + Σ p z², 이득 p∘z / S,
+            # 분산 갱신 p ← p / (1 + p z² / ρ) (정밀도에 z²/ρ를 더함, 빼기 없음 → 늘 양수). ρ = R + R₀.
+            pd = pd + Qp
+            z = sp * ep.reshape(-1)
+            rho = Rp + R0
+            pz = pd * z; S = rho + z @ pz
+            err = rp - Mp @ z
+            M2 = Mp + jnp.outer(err, pz) / S
+            got = (M2 @ z) @ rp / (rp @ rp + 1e-12)
+            return M2, pd / (1.0 + pd * z * z / rho), 0.5 * (err @ err / S + EP.H * jnp.log(S)), got
+
         def pp(Mp, Pp, sp, rp, Rp, Qp, ep):
             sp, rp, Rp, Qp, ep = (x.astype(KDT) for x in (sp, rp, Rp, Qp, ep))
             Pp = Pp + Qp * jnp.eye(DZ, dtype=KDT)
@@ -123,10 +136,11 @@ def write(th, O, acts, stop_t):
             M2 = Mp + jnp.outer(err, Pz) / S
             got = (M2 @ z) @ rp / (rp @ rp + 1e-12)
             return M2, Pp - jnp.outer(Pz, Pz) / S, 0.5 * (err @ err / S + EP.H * jnp.log(S)), got
-        M2, P2, nll, got = jax.vmap(pp_sqrt if SQRTKF else pp)(M, P, sg, r, R, Q, e)
+        M2, P2, nll, got = jax.vmap(pp_diag if DIAGP else (pp_sqrt if SQRTKF else pp))(M, P, sg, r, R, Q, e)
         keep = t > stop_t
         return (jnp.where(keep, M, M2), jnp.where(keep, P, P2), e), (jnp.where(keep, 0.0, nll.sum()), got[EP.SLOT], ell[EP.SLOT], e[EP.SLOT].reshape(-1))
-    c0 = (jnp.zeros((EP.NP, EP.H, DZ), KDT), jnp.tile(jnp.eye(DZ, dtype=KDT), (EP.NP, 1, 1)), jnp.zeros((EP.NP, NPOLE, KD), jnp.float32))
+    P0 = jnp.ones((EP.NP, DZ), KDT) if DIAGP else jnp.tile(jnp.eye(DZ, dtype=KDT), (EP.NP, 1, 1))
+    c0 = (jnp.zeros((EP.NP, EP.H, DZ), KDT), P0, jnp.zeros((EP.NP, NPOLE, KD), jnp.float32))
     if SQRTKF:                                                        # 제곱근형은 행렬곱 정밀도 highest (12.15·12.17 교훈)
         with jax.default_matmul_precision("highest"):
             return jax.lax.scan(f, c0, (O[:-1], acts, O[1:], jnp.arange(acts.shape[0])))
@@ -407,7 +421,7 @@ v0 = float(val_nll(th))
 j0 = judge(th)
 _START = ("KF_INIT=" + os.environ["KF_INIT"].split("/")[-1]) if os.environ.get('KF_INIT') else "12.13 (무작위 키 + 12.13 경험적 베이즈 σ²·R·q)"
 print(f"[start = {_START}{' + WM_LOAD' if _WL else ''}] val_nll {v0:.1f}  b1 {j0['b1']:.4f} b0 {j0['b0']:.4f} other {j0['other']:.4f}  ({time.time()-t0:.0f}s)", flush=True)
-res = dict(spec="cellkey_separate_synapse", R0=R0, obs_noise=_ON, freeze_keys=FREEZE_KEYS, kf64=KF64, sqrt_kf=SQRTKF, extra_revisit=os.environ.get("EXTRA_REVISIT", "0") == "1", before=dict(val_nll=v0, **j0, **params_summary(th)))
+res = dict(spec="cellkey_separate_synapse", R0=R0, diag_p=DIAGP, obs_noise=_ON, freeze_keys=FREEZE_KEYS, kf64=KF64, sqrt_kf=SQRTKF, extra_revisit=os.environ.get("EXTRA_REVISIT", "0") == "1", before=dict(val_nll=v0, **j0, **params_summary(th)))
 OUT = os.environ.get('OUT', '/workspace/RL-TDP/docs/world/results/synapse_layer_20261117/cellkey.json')
 
 ITERS = int(os.environ.get('ITERS', 2000))

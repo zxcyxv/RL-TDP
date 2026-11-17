@@ -11,6 +11,7 @@ import jax, jax.numpy as jnp, numpy as np, optax
 from rltdp.world import errand as ER, errand_learned as EL, errand_prec as EP, errand_reuse as RU
 
 ER.PUBLIC = False
+DIAGP = os.environ.get('DIAGP', '0') == '1'   # 대각 공분산 (KDN식)
 We, ybar = EL.emb_fixed(0)
 p0 = EP.init(jax.random.PRNGKey(0))                       # 사전학습 없음. 쓰는 것은 고정 난수 키 초기값 Wr뿐 (12.13과 같은 시드)
 NP, H, KD, NPOLE = EP.NP, EP.H, EP.DK, 2
@@ -75,19 +76,19 @@ def write(th, O, acts, stop_t):
         e, ell = step_e(kp, e, o, a)
         r = feat(o2) - F0(wp, o, a)                                       # 쓰기 기준: 기억 없는 예측의 잔차
         Z = sg[:, None] * e.reshape(NP, -1)                               # [12, DZ]
-        Pq = P + Q[:, None, None] * jnp.eye(DZ)
+        Pq = (P + Q[:, None]) if DIAGP else (P + Q[:, None, None] * jnp.eye(DZ))
         m = jnp.einsum('phd,pd->ph', M, Z)                                # 쓰기 전 읽기 [12, 8]
         g_ = G(wp, o, a, m)
         # 대칭화 (Pq + Pqᵀ)/2는 역전파에서 P 덩어리 전치 복사 (12GB)를 만들어 OOM → 쓰지 않음
-        PZ = jnp.einsum('pij,pj->pi', Pq, Z, precision='highest'); S = R + R0 + jnp.sum(Z * PZ, -1)   # TF32 아닌 FP32
+        PZ = (Pq * Z) if DIAGP else jnp.einsum('pij,pj->pi', Pq, Z, precision='highest'); S = R + R0 + jnp.sum(Z * PZ, -1)
         err_w = r - m                                                     # 칼만 쓰기 (G 없음)
         err = r - m - g_                                                  # 월드 모델 예측 오차
         nll = 0.5 * (jnp.sum(err ** 2, -1) / S + H * jnp.log(S))
         M2 = M + jnp.einsum('ph,pd->phd', err_w, PZ / S[:, None])
-        P2 = Pq - jnp.einsum('pi,pj->pij', PZ, PZ) / S[:, None, None]
+        P2 = (Pq / (1.0 + Pq * Z * Z / (R + R0)[:, None])) if DIAGP else (Pq - jnp.einsum('pi,pj->pij', PZ, PZ) / S[:, None, None])   # 대각: KDN식, 늘 양수
         keep = t > stop_t
         return (jnp.where(keep, M, M2), jnp.where(keep, P, P2), e), (jnp.where(keep, 0.0, nll.sum()), ell[EP.SLOT])
-    c0 = (jnp.zeros((NP, H, DZ)), jnp.tile(jnp.eye(DZ), (NP, 1, 1)), jnp.zeros((NP, NPOLE, KD)))
+    c0 = (jnp.zeros((NP, H, DZ)), jnp.ones((NP, DZ)) if DIAGP else jnp.tile(jnp.eye(DZ), (NP, 1, 1)), jnp.zeros((NP, NPOLE, KD)))
     return jax.lax.scan(f, c0, (O[:-1], acts, O[1:], jnp.arange(acts.shape[0])))
 
 

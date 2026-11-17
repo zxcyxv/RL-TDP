@@ -1,0 +1,2 @@
+R0 (observation noise floor) 1.3409488310832847e-06
+lengths: train (1024, 518) val (128, 512)
