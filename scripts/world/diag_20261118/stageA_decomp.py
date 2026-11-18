@@ -5,14 +5,15 @@
 #   Δf: m에 비선형이라 쓰기별로 나눌 수 없다. 대신 판정 점수에서 m과 Δf 각각의 크기·B 방향과, 각각만으로 매긴 판정을 기록.
 # 사건 (교사 세션 도착 칸 쓰기): b1 도착 (B), b0 도착 B, b0 도착 C, 다른 채집처 도착, 도착 없음.
 #   후보 b1, b0은 위 사건별로. 그 밖의 후보 ("다른 곳", A 판정의 주된 오답)는 [자기 채집처 도착, b1, b0 B, b0 C, 나머지 도착, 도착 없음].
-# 환경변수: CKPTS (쉼표, 'start' 허용), OUT. MEMIN=1로 stageA 정의를 불러 쓴다.
+# 환경변수: CKPTS (쉼표, 'start' 허용), OUT, MEMIN (기본 1; 0이면 대조판: 쓰기 목표 r = y − f(x, a, 0), Δf = 0).
 import sys, os, json, time
 import numpy as np
 
 ROOT = '/workspace/RL-TDP'
 SRC = f'{ROOT}/scripts/world/diag_20261118/stageA.py'
 OUT = os.environ['OUT']
-os.environ['MEMIN'] = '1'
+os.environ.setdefault('MEMIN', '1')
+MEMIN = os.environ['MEMIN'] == '1'                                # 0: 대조판 (f 입력에 m 대신 0)
 t0 = time.time()
 src = open(SRC).read()
 cut = src.index("t0 = time.time()\nv0 = float(val_nll(th))")
@@ -58,7 +59,7 @@ def one(th, sess, plans_w, ai_all):
         e = step_e(kp, e, o, a)
         Z = sg[:, None] * e.reshape(NP, -1)
         m = jnp.einsum('phd,pd->ph', M, Z)
-        fo = f_net(fp, o, a, m)
+        fo = f_net(fp, o, a, m if MEMIN else jnp.zeros_like(m))
         r = feat(o2) - fo                                                 # 쓰기 목표 r_t (v = r − m)
         Pq = P + Q[:, None, None] * jnp.eye(DZ)
         PZ = jnp.einsum('pij,pj->pi', Pq, Z, precision='highest')
@@ -77,7 +78,7 @@ def one(th, sess, plans_w, ai_all):
             e = step_e(kp, e, o, a)
             Zf = sg[:, None] * e.reshape(NP, -1)
             m = jnp.einsum('phd,pd->ph', MT, Zf)
-            df = f_net(fp, o, a, m) - f_net(fp, o, a, jnp.zeros_like(m))
+            df = (f_net(fp, o, a, m) - f_net(fp, o, a, jnp.zeros_like(m))) if MEMIN else jnp.zeros_like(m)
             st2, o2, _, _ = ER.env_step(st, a, jnp.array(1), sess["rid"][-1], jnp.array(False), sess["b0"])
             return (st2, o2, e), (Zf[SLOT], m[SLOT], df[SLOT])
         _, (Zs, ms, dfs) = jax.lax.scan(f, (s_end, O[-1], e_end), plan)

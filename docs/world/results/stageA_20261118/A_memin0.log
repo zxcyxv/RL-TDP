@@ -1,0 +1,19 @@
+MEMIN False R0 1.3409488310832847e-06
+lengths: train (1024, 518) val (128, 512)
+[it 0] val_nll -199484.7  mem b1 0.7070 b0 0.2930 other 0.0000 | full b1 0.4492 b0 0.5469 | b1 mse 0.4715 (m=0 0.5232) |f(m)-f(0)| 0.0000 | addr b1best 0.996 (0.892/0.628) | Pmin 3.07e-04 Smin 1.38e-05 fin True  (4s)
+  [time] it 1 loss -202104.7 (7.8s)
+  [time] it 2 loss -206958.7 (7.9s)
+  [time] it 3 loss -209828.4 (8.0s)
+  [time] it 10 loss -216672.9 (9.1s)
+it 100 train -264196.2 val -260436.4 best -260436.4@100 (23s)
+it 200 train -275344.1 val -271665.9 best -271665.9@200 (38s)
+it 300 train -277021.7 val -273600.9 best -273600.9@300 (52s)
+it 400 train -278865.0 val -274289.2 best -274289.2@400 (67s)
+it 500 train -277600.3 val -274611.7 best -274611.7@500 (82s)
+  [judge it 500] mem b1 0.6797 b0 0.3164 other 0.0039 | full b1 0.3984 b0 0.5703 | b1 mse 0.3275 (m=0 0.4707) |f(m)-f(0)| 0.0000 | addr b1best 0.504 (0.953/0.956) | Pmin 1.52e-03 Smin 1.36e-06 fin True
+it 600 train -277806.9 val -274965.4 best -274965.4@600 (98s)
+it 700 train -278889.3 val -275180.0 best -275180.0@700 (113s)
+it 800 train -279110.5 val -275713.7 best -275713.7@800 (128s)
+it 900 train -281839.1 val -278230.1 best -278230.1@900 (143s)
+nan at 979
+[best] val_nll -278230.1@900  mem b1 0.1758 b0 0.2969 other 0.5273 | full b1 0.1953 b0 0.3867 | b1 mse 0.3264 (m=0 0.5234) |f(m)-f(0)| 0.0000 | addr b1best 0.496 (0.998/0.998) | Pmin 7.27e-06 Smin 1.35e-06 fin True
