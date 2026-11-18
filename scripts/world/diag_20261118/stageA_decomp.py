@@ -10,7 +10,7 @@ import sys, os, json, time
 import numpy as np
 
 ROOT = '/workspace/RL-TDP'
-SRC = f'{ROOT}/scripts/world/diag_20261118/stageA.py'
+SRC = os.environ.get('DEFS', f'{ROOT}/scripts/world/diag_20261118/stageA.py')   # DEFS=stageA_split.py (+ GNET=1)이면 분할판·g판 순전파
 OUT = os.environ['OUT']
 os.environ.setdefault('MEMIN', '1')
 MEMIN = os.environ['MEMIN'] == '1'                                # 0: 대조판 (f 입력에 m 대신 0)
@@ -20,6 +20,8 @@ cut = src.index("t0 = time.time()\nv0 = float(val_nll(th))")
 ns = {'__name__': 'stageA_defs'}
 exec(compile(src[:cut], SRC, 'exec'), ns)
 jax, jnp = ns['jax'], ns['jnp']
+slow_pred = ns.get('slow_pred')                                     # 분할판·g판: 쓰기 목표 r = y − slow_pred(x, a, m); g판 판정 Δ = g(m) − g(0)
+g_net = ns.get('g_net')
 ER, EL, EP, RU = ns['ER'], ns['EL'], ns['EP'], ns['RU']
 th0, stack, plans, arrive, b1, b0 = ns['th'], ns['stack'], ns['plans'], ns['arrive'], ns['b1'], ns['b0']
 feat, f_net, predict, step_e, gB, R0 = ns['feat'], ns['f_net'], ns['predict'], ns['step_e'], ns['gB'], ns['R0']
@@ -59,7 +61,7 @@ def one(th, sess, plans_w, ai_all):
         e = step_e(kp, e, o, a)
         Z = sg[:, None] * e.reshape(NP, -1)
         m = jnp.einsum('phd,pd->ph', M, Z)
-        fo = f_net(fp, o, a, m if MEMIN else jnp.zeros_like(m))
+        fo = slow_pred(fp, o, a, m) if slow_pred else f_net(fp, o, a, m if MEMIN else jnp.zeros_like(m))
         r = feat(o2) - fo                                                 # 쓰기 목표 r_t (v = r − m)
         Pq = P + Q[:, None, None] * jnp.eye(DZ)
         PZ = jnp.einsum('pij,pj->pi', Pq, Z, precision='highest')
@@ -78,7 +80,7 @@ def one(th, sess, plans_w, ai_all):
             e = step_e(kp, e, o, a)
             Zf = sg[:, None] * e.reshape(NP, -1)
             m = jnp.einsum('phd,pd->ph', MT, Zf)
-            df = (f_net(fp, o, a, m) - f_net(fp, o, a, jnp.zeros_like(m))) if MEMIN else jnp.zeros_like(m)
+            df = (g_net(fp, o, a, m) - g_net(fp, o, a, jnp.zeros_like(m))) if g_net else ((f_net(fp, o, a, m) - f_net(fp, o, a, jnp.zeros_like(m))) if MEMIN else jnp.zeros_like(m))
             st2, o2, _, _ = ER.env_step(st, a, jnp.array(1), sess["rid"][-1], jnp.array(False), sess["b0"])
             return (st2, o2, e), (Zf[SLOT], m[SLOT], df[SLOT])
         _, (Zs, ms, dfs) = jax.lax.scan(f, (s_end, O[-1], e_end), plan)

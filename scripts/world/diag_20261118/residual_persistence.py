@@ -8,7 +8,7 @@ import sys, os, json, time
 import numpy as np
 
 ROOT = '/workspace/RL-TDP'
-SRC = f'{ROOT}/scripts/world/diag_20261118/stageA.py'
+SRC = os.environ.get('DEFS', f'{ROOT}/scripts/world/diag_20261118/stageA.py')   # DEFS=stageA_split.py (+ GNET=1)이면 분할판·g판 순전파
 OUT = os.environ['OUT']
 os.environ['MEMIN'] = '1'
 t0 = time.time()
@@ -16,6 +16,8 @@ src = open(SRC).read()
 ns = {'__name__': 'stageA_defs'}
 exec(compile(src[:src.index("t0 = time.time()\nv0 = float(val_nll(th))")], SRC, 'exec'), ns)
 jax, jnp = ns['jax'], ns['jnp']
+slow_pred = ns.get('slow_pred')                                     # 분할판·g판: 쓰기 목표 r = y − slow_pred(x, a, m); g판 판정 Δ = g(m) − g(0)
+g_net = ns.get('g_net')
 ER, EL, RU = ns['ER'], ns['EL'], ns['RU']
 th0, stack = ns['th'], ns['stack']
 feat, f_net, step_e, R0 = ns['feat'], ns['f_net'], ns['step_e'], ns['R0']
@@ -37,7 +39,7 @@ def one(th, sess):
         e = step_e(kp, e, o, a)
         Z = sg[:, None] * e.reshape(NP, -1)
         m = jnp.einsum('phd,pd->ph', M, Z)
-        r = feat(o2) - f_net(fp, o, a, m)
+        r = feat(o2) - (slow_pred(fp, o, a, m) if slow_pred else f_net(fp, o, a, m))
         Pq = P + Q[:, None, None] * jnp.eye(DZ)
         PZ = jnp.einsum('pij,pj->pi', Pq, Z, precision='highest')
         S = R + R0 + jnp.sum(Z * PZ, -1)

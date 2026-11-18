@@ -3,6 +3,9 @@
 #   기억 쓰기 목표 r = y − sg(μ), 기억 손실 L_mem = ½Σ(‖r − m‖²/S + 8 log S) (키·흔적·칼만만 학습). 예측 ŷ = μ + m (f₀ 입력에 기억 없음).
 #   이유 (docs/world/results/invariants_20261118): 전체 손실로 f를 함께 학습하면 f가 HUD 칸의 지속 잔차를 기억에 넘겨 기억이 마지막 값 레지스터가 된다.
 #   L_f에는 m이 없으므로 f₀가 몫을 넘길 경로가 없다. 한 학습 루프에서 L_f + L_mem을 함께 최적화.
+# GNET=1 (2026-11-18): 분할판 위에 기억 입력 망 g를 더한다 (명세 A의 망 입력 효과). ŷ = μ₀(x, a) + m + g(x, a, m).
+#   g: [x 96; a 6; m 96] → SiLU 256 → 96, 마지막 층 0 (처음에는 분할판과 같음). g는 L_mem (v = y − sg(μ₀) − m − g)으로 학습, f₀는 그대로 L_f만.
+#   대조 = GNET=0 분할판 (A_split). 판정 mem = m + g(m) − g(0).
 # 이하 stageA.py 설명 (판정·출발점·기록은 같음; MEMIN은 0으로 고정):
 # 단계 A · 기억을 입력받는 월드 모델 (명세 docs/world/spec_memory_wm_agent.md 4절), 2026-11-18
 #   ŷ_t(a) = m_t(a) + f_θ(x_t, a, m_t(a)),  m_p = M_p z_p (쓰기 전 읽기)
@@ -46,6 +49,13 @@ fp = dict(W1=jnp.concatenate([jnp.array(wq['wm1']), jnp.zeros((HY, 256))]), b1=j
           W2=jnp.array(wq['wm2']), b2=jnp.array(wq['wb2']))                               # 평균 96 + 칸별 로그 분산 12 (wm_q8 그대로)
 kp = {k: jnp.array(bz[f'kp/{k}']) for k in ('W1', 'b1', 'W2', 'b2', 'Wk', 'lw', 'lb', 'ta')}
 kf = {k: jnp.array(bz[f'kf/{k}']) for k in ('ls', 'lr', 'lq')}
+GNET = os.environ.get('GNET', '0') == '1'
+if GNET:
+    _kg = jax.random.split(jax.random.PRNGKey(13), 2)
+    fp.update(G1=jax.random.normal(_kg[0], (2 * HY + ER.NA, 256)) / np.sqrt(2 * HY + ER.NA), Gb1=jnp.zeros(256),
+              G2=jnp.zeros((256, HY)), Gb2=jnp.zeros(HY))
+    if 'A_split.json' in OUT:
+        OUT = OUT.replace('A_split.json', 'A_split_g.json')
 th = jax.tree_util.tree_map(lambda x: jnp.asarray(x, jnp.float32), dict(fp=fp, kp=kp, kf=kf))
 
 
@@ -63,9 +73,21 @@ def f_net(fp, o, a, m):
     return f_full(fp, o, a, m)[0]
 
 
+def g_net(fp, o, a, m):
+    if not GNET:
+        return jnp.zeros_like(m)
+    x = jnp.concatenate([feat(o).reshape(-1), jax.nn.one_hot(a, ER.NA), m.reshape(-1)])
+    return (jax.nn.silu(x @ fp["G1"] + fp["Gb1"]) @ fp["G2"] + fp["Gb2"]).reshape(NP, H)
+
+
+def slow_pred(fp, o, a, m):
+    """ŷ에서 바깥 +m을 뺀 부분 = 기억의 쓰기 목표 r = y − slow_pred."""
+    return f_net(fp, o, a, jnp.zeros_like(m)) + g_net(fp, o, a, m)
+
+
 def predict(fp, o, a, m):
-    """ŷ = m + f(x, a, m) (본판) 또는 m + f(x, a, 0) (대조)."""
-    return m + f_net(fp, o, a, m if MEMIN else jnp.zeros_like(m))
+    """ŷ = μ₀(x, a) + m + g(x, a, m)."""
+    return m + slow_pred(fp, o, a, m)
 
 
 def key_fn(kp, o, a):
@@ -95,7 +117,7 @@ def write(th, O, acts, stop_t):
         mu, lv = f_full(fp, o, a, jnp.zeros_like(m))
         y = feat(o2)
         nll_f = 0.5 * (jnp.sum((y - mu) ** 2, -1) * jnp.exp(-lv) + H * lv)   # f₀의 기억 없는 NLL (f₀만 학습)
-        v = y - jax.lax.stop_gradient(mu) - m                             # 기억 쓰기·손실: 느린 예측은 상수
+        v = y - jax.lax.stop_gradient(mu) - m - g_net(fp, o, a, m)       # 기억 쓰기·손실: 느린 예측 μ₀는 상수, g는 이 손실로 학습
         Pq = P + Q[:, None, None] * jnp.eye(DZ)
         PZ = jnp.einsum('pij,pj->pi', Pq, Z, precision='highest')
         S = R + R0 + jnp.sum(Z * PZ, -1)
@@ -160,7 +182,7 @@ def judge_one(th, sess, plans, ai_all, tb1):
             m = jnp.einsum('phd,pd->ph', M, Z)
             y_m = predict(fp, o, a, m)
             y_0 = predict(fp, o, a, jnp.zeros_like(m))
-            fd = f_net(fp, o, a, m) - f_net(fp, o, a, jnp.zeros_like(m))
+            fd = g_net(fp, o, a, m) - g_net(fp, o, a, jnp.zeros_like(m))
             s2, o2, _, _ = ER.env_step(s, a, jnp.array(1), sess["rid"][-1], jnp.array(False), sess["b0"])
             return (s2, o2, e), (y_m[SLOT], y_0[SLOT], fd[SLOT], m[SLOT], Z[SLOT], feat(o2)[SLOT])
         _, out = jax.lax.scan(f, (s_end, O[-1], e), plan)
