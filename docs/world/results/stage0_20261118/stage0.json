@@ -1,0 +1,150 @@
+{
+ "spec": "stage0",
+ "src": "/workspace/RL-TDP/scripts/world/diag_20261117/synapse_wm_joint.py",
+ "ckpt": "/workspace/RL-TDP/docs/world/results/synapse_layer_20261117/wm_joint_10k_best_params.npz",
+ "logged_best_it": 900,
+ "a": {
+  "init": {
+   "syn": {
+    "b1": 0.37890625,
+    "b0": 0.58984375,
+    "other": 0.03125,
+    "logged_b1": 0.37890625,
+    "logged_b0": 0.58984375,
+    "per_world_identical": true,
+    "n_world_diff": 0
+   },
+   "wm": {
+    "b1": 0.37890625,
+    "b0": 0.58984375,
+    "other": 0.03125,
+    "logged_b1": 0.37890625,
+    "logged_b0": 0.58984375,
+    "per_world_identical": true,
+    "n_world_diff": 0
+   },
+   "wm_memoff": {
+    "b1": 0.1875,
+    "b0": 0.19140625,
+    "other": 0.62109375,
+    "logged_b1": 0.1875,
+    "logged_b0": 0.19140625,
+    "per_world_identical": true,
+    "n_world_diff": 0
+   }
+  },
+  "it900": {
+   "syn": {
+    "b1": 0.2578125,
+    "b0": 0.35546875,
+    "other": 0.38671875,
+    "logged_b1": 0.2578125,
+    "logged_b0": 0.35546875,
+    "per_world_identical": true,
+    "n_world_diff": 0
+   },
+   "wm": {
+    "b1": 0.21875,
+    "b0": 0.34765625,
+    "other": 0.43359375,
+    "logged_b1": 0.21875,
+    "logged_b0": 0.34765625,
+    "per_world_identical": true,
+    "n_world_diff": 0
+   },
+   "wm_memoff": {
+    "b1": 0.16015625,
+    "b0": 0.19921875,
+    "other": 0.640625,
+    "logged_b1": 0.16015625,
+    "logged_b0": 0.19921875,
+    "per_world_identical": true,
+    "n_world_diff": 0
+   }
+  }
+ },
+ "b": {
+  "init": {
+   "n_worlds": 16,
+   "max_abs_diff": 0.0,
+   "argmax_agree": 1.0
+  },
+  "it900": {
+   "n_worlds": 16,
+   "max_abs_diff": 0.0,
+   "argmax_agree": 1.0
+  }
+ },
+ "c": {
+  "init": {
+   "syn": {
+    "b1": 0.1875,
+    "b0": 0.19140625,
+    "other": 0.62109375
+   },
+   "wm": {
+    "b1": 0.1875,
+    "b0": 0.19140625,
+    "other": 0.62109375
+   },
+   "wm_memoff": {
+    "b1": 0.1875,
+    "b0": 0.19140625,
+    "other": 0.62109375
+   },
+   "syn_all_tied": 1.0
+  },
+  "it900": {
+   "syn": {
+    "b1": 0.1875,
+    "b0": 0.19140625,
+    "other": 0.62109375
+   },
+   "wm": {
+    "b1": 0.16015625,
+    "b0": 0.19921875,
+    "other": 0.640625
+   },
+   "wm_memoff": {
+    "b1": 0.16015625,
+    "b0": 0.19921875,
+    "other": 0.640625
+   },
+   "syn_all_tied": 1.0
+  }
+ },
+ "d": {
+  "init": {
+   "b1_visits_hist": {
+    "1": 256
+   },
+   "b1_item_was_B": 1.0,
+   "t_arrive_b1_median": 43.0,
+   "stop_t_median": 441.0,
+   "gap_stop_minus_b1_median": 400.0,
+   "b1_written_before_stop": 1.0,
+   "resid_cos_gB_median": 0.7043937742710114,
+   "dM_ratio_b1_over_median": 139.85367507251772,
+   "addr_b1_best_frac": 0.99609375,
+   "addr_cos_b1_median": 0.8918092250823975,
+   "addr_cos_other_max_median": 0.6281643807888031,
+   "note": "b1 \ub2e8\uc11c = \uad00\ucc30 \ub2e8\uacc4\uc5d0\uc11c b1 \uc791\uc5c5 \ub4a4 D\uc2a4\ud15d\uc5d0 HUD \ub3c4\ucc29 \uce78(SLOT=10)\uc5d0 B \uadf8\ub9bc\uc774 \uc9c1\uc811 \ubcf4\uc784 (\ucd9c\ucc98 \ud45c\uc2dc \uc5c6\uc74c). \ucc44\uc9d1\ucc98\uc640\uc758 \uc5f0\uacb0\uc740 \ud754\uc801 \uc8fc\uc18c\ub85c\ub9cc (\uac04\uc811). \uc4f0\uae30\ub294 \uadf8 \uc2a4\ud15d\uc758 \uc608\uce21 \uc77d\uae30 \ub4a4. \ud310\uc815 \uc77d\uae30\ub294 \uc4f0\uae30 \uc885\ub8cc \ub4a4, \uc815\ub2f5 \ud2b9\uc9d5\uc744 \ubcf4\uc9c0 \uc54a\uc74c."
+  },
+  "it900": {
+   "b1_visits_hist": {
+    "1": 256
+   },
+   "b1_item_was_B": 1.0,
+   "t_arrive_b1_median": 43.0,
+   "stop_t_median": 441.0,
+   "gap_stop_minus_b1_median": 400.0,
+   "b1_written_before_stop": 1.0,
+   "resid_cos_gB_median": 0.6948945820331573,
+   "dM_ratio_b1_over_median": 46.09562349032093,
+   "addr_b1_best_frac": 0.3984375,
+   "addr_cos_b1_median": 0.997955709695816,
+   "addr_cos_other_max_median": 0.9985004365444183,
+   "note": "b1 \ub2e8\uc11c = \uad00\ucc30 \ub2e8\uacc4\uc5d0\uc11c b1 \uc791\uc5c5 \ub4a4 D\uc2a4\ud15d\uc5d0 HUD \ub3c4\ucc29 \uce78(SLOT=10)\uc5d0 B \uadf8\ub9bc\uc774 \uc9c1\uc811 \ubcf4\uc784 (\ucd9c\ucc98 \ud45c\uc2dc \uc5c6\uc74c). \ucc44\uc9d1\ucc98\uc640\uc758 \uc5f0\uacb0\uc740 \ud754\uc801 \uc8fc\uc18c\ub85c\ub9cc (\uac04\uc811). \uc4f0\uae30\ub294 \uadf8 \uc2a4\ud15d\uc758 \uc608\uce21 \uc77d\uae30 \ub4a4. \ud310\uc815 \uc77d\uae30\ub294 \uc4f0\uae30 \uc885\ub8cc \ub4a4, \uc815\ub2f5 \ud2b9\uc9d5\uc744 \ubcf4\uc9c0 \uc54a\uc74c."
+  }
+ }
+}
