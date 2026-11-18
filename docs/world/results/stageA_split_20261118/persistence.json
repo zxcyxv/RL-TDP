@@ -1,0 +1,252 @@
+{
+ "start": {
+  "card/all": {
+   "f_leftover_r2": 0.0016502750804647803,
+   "final_err_v2": 0.0010743944440037012,
+   "persistence": 1.0421342849731445,
+   "mean_S": 8.618227730039507e-05,
+   "nll_per_step": -33.02262496948242,
+   "steps_per_world": 443.90234375
+  },
+  "arrival_slot/all": {
+   "f_leftover_r2": 0.011226854287087917,
+   "final_err_v2": 0.011708512902259827,
+   "persistence": 2.014836549758911,
+   "mean_S": 0.0011640249285846949,
+   "nll_per_step": -22.491344451904297,
+   "steps_per_world": 443.90234375
+  },
+  "arrival_slot/arrival": {
+   "f_leftover_r2": 0.3965287208557129,
+   "final_err_v2": 0.3579311668872833,
+   "persistence": 1.1005476713180542,
+   "mean_S": 0.0012662609806284308,
+   "nll_per_step": 116.12580871582031,
+   "steps_per_world": 11.0
+  },
+  "arrival_slot/non_arrival": {
+   "f_leftover_r2": 0.0014363760128617287,
+   "final_err_v2": 0.0029110333416610956,
+   "persistence": 8.455955505371094,
+   "mean_S": 0.0011614272370934486,
+   "nll_per_step": -26.013591766357422,
+   "steps_per_world": 432.90234375
+  },
+  "stamp/all": {
+   "f_leftover_r2": 0.015114269219338894,
+   "final_err_v2": 0.009418077766895294,
+   "persistence": 1.379854679107666,
+   "mean_S": 0.0011042143451049924,
+   "nll_per_step": -22.899734497070312,
+   "steps_per_world": 443.90234375
+  },
+  "view/all": {
+   "f_leftover_r2": 0.2638697922229767,
+   "final_err_v2": 0.07824355363845825,
+   "persistence": 2.541349172592163,
+   "mean_S": 0.010671883821487427,
+   "nll_per_step": -33.36415481567383,
+   "steps_per_world": 443.90234375
+  }
+ },
+ "split500": {
+  "card/all": {
+   "f_leftover_r2": 0.0015035184333100915,
+   "final_err_v2": 0.001530845882371068,
+   "persistence": 1.3354721069335938,
+   "mean_S": 0.00011523111606948078,
+   "nll_per_step": -39.25316619873047,
+   "steps_per_world": 443.90234375
+  },
+  "arrival_slot/all": {
+   "f_leftover_r2": 0.010939925909042358,
+   "final_err_v2": 0.010974004864692688,
+   "persistence": 2.0018794536590576,
+   "mean_S": 0.001153309247456491,
+   "nll_per_step": -22.63398551940918,
+   "steps_per_world": 443.90234375
+  },
+  "arrival_slot/arrival": {
+   "f_leftover_r2": 0.4061618149280548,
+   "final_err_v2": 0.35909587144851685,
+   "persistence": 1.0729261636734009,
+   "mean_S": 0.0012222272343933582,
+   "nll_per_step": 124.15656280517578,
+   "steps_per_world": 11.0
+  },
+  "arrival_slot/non_arrival": {
+   "f_leftover_r2": 0.0008973823278211057,
+   "final_err_v2": 0.0021282678935676813,
+   "persistence": 12.69814682006836,
+   "mean_S": 0.0011515580117702484,
+   "nll_per_step": -26.36391830444336,
+   "steps_per_world": 432.90234375
+  },
+  "stamp/all": {
+   "f_leftover_r2": 0.014871375635266304,
+   "final_err_v2": 0.013825811445713043,
+   "persistence": 1.4162451028823853,
+   "mean_S": 0.0009088258375413716,
+   "nll_per_step": -31.18635368347168,
+   "steps_per_world": 443.90234375
+  },
+  "view/all": {
+   "f_leftover_r2": 0.2602960765361786,
+   "final_err_v2": 0.07632295042276382,
+   "persistence": 2.716871976852417,
+   "mean_S": 0.014261714182794094,
+   "nll_per_step": -37.42646789550781,
+   "steps_per_world": 443.90234375
+  }
+ },
+ "split1000": {
+  "card/all": {
+   "f_leftover_r2": 0.0007560938829556108,
+   "final_err_v2": 0.001139282830990851,
+   "persistence": 1.3881890773773193,
+   "mean_S": 8.787642582319677e-05,
+   "nll_per_step": -40.716697692871094,
+   "steps_per_world": 443.90234375
+  },
+  "arrival_slot/all": {
+   "f_leftover_r2": 0.010690140537917614,
+   "final_err_v2": 0.010757746174931526,
+   "persistence": 2.011284589767456,
+   "mean_S": 0.0011590808862820268,
+   "nll_per_step": -22.712167739868164,
+   "steps_per_world": 443.90234375
+  },
+  "arrival_slot/arrival": {
+   "f_leftover_r2": 0.4153371751308441,
+   "final_err_v2": 0.3565726578235626,
+   "persistence": 1.0518101453781128,
+   "mean_S": 0.0012198305921629071,
+   "nll_per_step": 125.2685775756836,
+   "steps_per_world": 11.0
+  },
+  "arrival_slot/non_arrival": {
+   "f_leftover_r2": 0.00040810491191223264,
+   "final_err_v2": 0.0019706282764673233,
+   "persistence": 26.84659767150879,
+   "mean_S": 0.0011575372191146016,
+   "nll_per_step": -26.472339630126953,
+   "steps_per_world": 432.90234375
+  },
+  "stamp/all": {
+   "f_leftover_r2": 0.014645189978182316,
+   "final_err_v2": 0.012684264220297337,
+   "persistence": 1.3428057432174683,
+   "mean_S": 0.0008069411269389093,
+   "nll_per_step": -32.439334869384766,
+   "steps_per_world": 443.90234375
+  },
+  "view/all": {
+   "f_leftover_r2": 0.2382117658853531,
+   "final_err_v2": 0.07152149826288223,
+   "persistence": 2.6660587787628174,
+   "mean_S": 0.0159236378967762,
+   "nll_per_step": -38.5467529296875,
+   "steps_per_world": 443.90234375
+  }
+ },
+ "split1500": {
+  "card/all": {
+   "f_leftover_r2": 0.0004745927872136235,
+   "final_err_v2": 0.0008415125194005668,
+   "persistence": 1.5713239908218384,
+   "mean_S": 5.494473589351401e-05,
+   "nll_per_step": -42.033668518066406,
+   "steps_per_world": 443.90234375
+  },
+  "arrival_slot/all": {
+   "f_leftover_r2": 0.010845617391169071,
+   "final_err_v2": 0.010544376447796822,
+   "persistence": 1.9459089040756226,
+   "mean_S": 0.0011303054634481668,
+   "nll_per_step": -22.778091430664062,
+   "steps_per_world": 443.90234375
+  },
+  "arrival_slot/arrival": {
+   "f_leftover_r2": 0.4127301275730133,
+   "final_err_v2": 0.35388973355293274,
+   "persistence": 1.058431625366211,
+   "mean_S": 0.0011805262183770537,
+   "nll_per_step": 129.00926208496094,
+   "steps_per_world": 11.0
+  },
+  "arrival_slot/non_arrival": {
+   "f_leftover_r2": 0.0006337769445963204,
+   "final_err_v2": 0.0018200104823336005,
+   "persistence": 16.65284538269043,
+   "mean_S": 0.0011290293186903,
+   "nll_per_step": -26.634990692138672,
+   "steps_per_world": 432.90234375
+  },
+  "stamp/all": {
+   "f_leftover_r2": 0.01548977941274643,
+   "final_err_v2": 0.011445493437349796,
+   "persistence": 1.1898053884506226,
+   "mean_S": 0.0008924668654799461,
+   "nll_per_step": -33.355987548828125,
+   "steps_per_world": 443.90234375
+  },
+  "view/all": {
+   "f_leftover_r2": 0.2204994410276413,
+   "final_err_v2": 0.06891661137342453,
+   "persistence": 2.577197551727295,
+   "mean_S": 0.014057648368179798,
+   "nll_per_step": -39.087547302246094,
+   "steps_per_world": 443.90234375
+  }
+ },
+ "split2000": {
+  "card/all": {
+   "f_leftover_r2": 0.00037051099934615195,
+   "final_err_v2": 0.0006308630108833313,
+   "persistence": 1.785640001296997,
+   "mean_S": 4.315211845096201e-05,
+   "nll_per_step": -43.519283294677734,
+   "steps_per_world": 443.90234375
+  },
+  "arrival_slot/all": {
+   "f_leftover_r2": 0.010585978627204895,
+   "final_err_v2": 0.010285998694598675,
+   "persistence": 1.9653602838516235,
+   "mean_S": 0.0011118319816887379,
+   "nll_per_step": -22.812484741210938,
+   "steps_per_world": 443.90234375
+  },
+  "arrival_slot/arrival": {
+   "f_leftover_r2": 0.41838037967681885,
+   "final_err_v2": 0.3547135591506958,
+   "persistence": 1.0455950498580933,
+   "mean_S": 0.0011116811074316502,
+   "nll_per_step": 136.5459442138672,
+   "steps_per_world": 11.0
+  },
+  "arrival_slot/non_arrival": {
+   "f_leftover_r2": 0.00022396730491891503,
+   "final_err_v2": 0.0015341328689828515,
+   "persistence": 45.662105560302734,
+   "mean_S": 0.0011118358233943582,
+   "nll_per_step": -26.86176300048828,
+   "steps_per_world": 432.90234375
+  },
+  "stamp/all": {
+   "f_leftover_r2": 0.016526982188224792,
+   "final_err_v2": 0.010896439664065838,
+   "persistence": 1.0509408712387085,
+   "mean_S": 0.0009578465251252055,
+   "nll_per_step": -33.89019012451172,
+   "steps_per_world": 443.90234375
+  },
+  "view/all": {
+   "f_leftover_r2": 0.2091560959815979,
+   "final_err_v2": 0.07573605328798294,
+   "persistence": 2.498999834060669,
+   "mean_S": 0.019414160400629044,
+   "nll_per_step": -39.49652862548828,
+   "steps_per_world": 443.90234375
+  }
+ }
+}

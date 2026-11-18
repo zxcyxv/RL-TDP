@@ -141,6 +141,8 @@ for item in os.environ['CKPTS'].split(','):
     else:
         z = np.load(path)
         th = {a: {b: (jnp.array(z[f"{a}/{b}"]) if f"{a}/{b}" in z.files else th0[a][b]) for b in th0[a]} for a in th0}
+        if th["fp"]["W2"].shape[1] > th0["fp"]["W2"].shape[1]:                # 분할판 f₀ (평균 96 + 로그 분산 12): 평균 부분만 (순전파 같음)
+            th["fp"]["W2"], th["fp"]["b2"] = th["fp"]["W2"][:, :th0["fp"]["W2"].shape[1]], th["fp"]["b2"][:th0["fp"]["b2"].shape[0]]
         if not any(k.startswith('fp/') for k in z.files):
             print(f"  {name}: fp from start (f fixed)", flush=True)
     rep[name] = run(th)
