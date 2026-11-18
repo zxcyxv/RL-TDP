@@ -473,6 +473,8 @@ for it in range(1, ITERS + 1):
             jj = judge(th)
             curve[-1].update(b1=jj["b1"], b0=jj["b0"], other=jj["other"])
             print(f"  [judge it {it}] b1 {jj['b1']:.4f} b0 {jj['b0']:.4f} other {jj['other']:.4f}", flush=True)
+            if os.environ.get('SAVE_JUDGE_CKPT') == '1':                   # 2026-11-18: 판정 시점 체크포인트 (하락·회복 분해용)
+                np.savez(OUT.replace('.json', f'_it{it}_params.npz'), **{f"{a}/{b}": np.array(vv) for a in th for b, vv in th[a].items()})
         if it - best_it >= PAT:
             print("early stop", flush=True); break
 
