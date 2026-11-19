@@ -1,0 +1,8 @@
+[project]
+name = "rltdp"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = ["jax", "optax", "numpy"]
+
+[tool.setuptools.packages.find]
+include = ["rltdp*"]
