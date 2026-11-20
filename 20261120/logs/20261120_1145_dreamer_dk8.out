@@ -1,0 +1,97 @@
+---  ___                           __   ______ ---
+--- |   \ _ _ ___ __ _ _ __  ___ _ \ \ / /__ / ---
+--- | |) | '_/ -_) _` | '  \/ -_) '/\ V / |_ \ ---
+--- |___/|_| \___\__,_|_|_|_\___|_|  \_/ |___/ ---
+Replica: 0 / 1
+Logdir: /workspace/ext/logs/20261120_base_dk8_s1m_tr64
+Run script: train
+Observations
+  image            Space(uint8, shape=(64, 64, 3), low=0, high=255)
+  reward           Space(float32, shape=(), low=-inf, high=inf)
+  is_first         Space(bool, shape=(), low=False, high=True)
+  is_last          Space(bool, shape=(), low=False, high=True)
+  is_terminal      Space(bool, shape=(), low=False, high=True)
+Actions
+  action           Space(int32, shape=(), low=0, high=7)
+Extras
+  consec           Space(int32, shape=(), low=-2147483648, high=2147483647)
+  stepid           Space(uint8, shape=(20,), low=0, high=255)
+  dyn/deter        Space(float32, shape=(512,), low=-inf, high=inf)
+  dyn/stoch        Space(float32, shape=(32, 4), low=-inf, high=inf)
+JAX devices (1): [cuda:0]
+Policy devices: cuda:0
+Train devices:  cuda:0
+Initializing parameters...
+Optimizer opt has 686,585 params:
+       376,768 dyn
+        80,595 dec
+        66,111 val
+        57,663 rew
+        49,991 pol
+        41,153 con
+        14,304 enc
+Done initializing!
+Compiling 1 checkpoint groups...
+Largest checkpoint group: 0 GB
+Compiling train and report...
+W1120 11:45:46.855243   14890 cuda_timer.cc:88] Delay kernel timed out: measured time has sub-optimal accuracy. There may be a missing warmup execution, please investigate in Nsight Systems.
+Train cost analysis:
+No available
+Report cost analysis:
+No available
+Done compiling!
+Did not find any checkpoint.
+Saving checkpoint: /workspace/ext/logs/20261120_base_dk8_s1m_tr64/ckpt/20261120T114618F905584
+Saved checkpoint.
+Start training loop
+Start JAX profiler: /workspace/ext/logs/20261120_base_dk8_s1m_tr64
+Stop JAX profiler
+
+--------------------[Agent Step 85_616]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 0 / episode/length 257 / train/loss/con 0.05 / train/loss/dyn 3.74 / train/loss/image 93.23 / train/loss/policy -5.2e-4 / train/loss/rep 3.74 / train/loss/repval 1.85 / train/loss/rew 0.92 / train/loss/value 1.19 / train/rand/action 1 / replay/replay_ratio 64.24 / fps/policy 663.72 / fps/train 4.1e4
+
+Writing metrics: /workspace/ext/logs/20261120_base_dk8_s1m_tr64/metrics.jsonl
+Writing metrics: /workspace/ext/logs/20261120_base_dk8_s1m_tr64/scores.jsonl
+
+--------------------[Agent Step 194_832]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 0 / episode/length 257 / train/loss/con 0.02 / train/loss/dyn 1.82 / train/loss/image 8.15 / train/loss/policy -5.1e-4 / train/loss/rep 1.82 / train/loss/repval 0.06 / train/loss/rew 1.5e-3 / train/loss/value 0.05 / train/rand/action 1 / replay/replay_ratio 65 / fps/policy 910 / fps/train 5.8e4
+
+Writing metrics: /workspace/ext/logs/20261120_base_dk8_s1m_tr64/metrics.jsonlWriting metrics: /workspace/ext/logs/20261120_base_dk8_s1m_tr64/scores.jsonl
+
+
+--------------------[Agent Step 303_104]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 0 / episode/length 257 / train/loss/con 0.02 / train/loss/dyn 2.38 / train/loss/image 6.86 / train/loss/policy -4.1e-6 / train/loss/rep 2.38 / train/loss/repval 0.49 / train/loss/rew 3.4e-4 / train/loss/value 0.48 / train/rand/action 0.91 / replay/replay_ratio 65 / fps/policy 901.4 / fps/train 5.8e4
+
+Writing metrics: /workspace/ext/logs/20261120_base_dk8_s1m_tr64/scores.jsonlWriting metrics: /workspace/ext/logs/20261120_base_dk8_s1m_tr64/metrics.jsonl
+
+
+--------------------[Agent Step 388_576]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 0 / episode/length 257 / train/loss/con 0.02 / train/loss/dyn 2.98 / train/loss/image 5.91 / train/loss/policy 2.8e-5 / train/loss/rep 2.98 / train/loss/repval 1.33 / train/loss/rew 1.7e-4 / train/loss/value 1.27 / train/rand/action 0.66 / replay/replay_ratio 65 / fps/policy 712.75 / fps/train 4.6e4
+
+Writing metrics: /workspace/ext/logs/20261120_base_dk8_s1m_tr64/metrics.jsonlWriting metrics: /workspace/ext/logs/20261120_base_dk8_s1m_tr64/scores.jsonl
+
+
+--------------------[Agent Step 465_168]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 1 / episode/length 146 / train/loss/con 0.02 / train/loss/dyn 3.5 / train/loss/image 5.12 / train/loss/policy 4.7e-4 / train/loss/rep 3.5 / train/loss/repval 1.25 / train/loss/rew 2.4e-4 / train/loss/value 1.17 / train/rand/action 0.62 / replay/replay_ratio 65 / fps/policy 637.74 / fps/train 4.1e4
+
+Writing metrics: /workspace/ext/logs/20261120_base_dk8_s1m_tr64/metrics.jsonl
+Writing metrics: /workspace/ext/logs/20261120_base_dk8_s1m_tr64/scores.jsonl
+
+--------------------[Agent Step 547_552]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 1 / episode/length 35 / train/loss/con 0.02 / train/loss/dyn 4.14 / train/loss/image 4.44 / train/loss/policy 7.9e-4 / train/loss/rep 4.14 / train/loss/repval 1.16 / train/loss/rew 8.3e-4 / train/loss/value 1.12 / train/rand/action 0.34 / replay/replay_ratio 65 / fps/policy 686.46 / fps/train 4.4e4
+
+Writing metrics: /workspace/ext/logs/20261120_base_dk8_s1m_tr64/scores.jsonl
+Writing metrics: /workspace/ext/logs/20261120_base_dk8_s1m_tr64/metrics.jsonl
+
+--------------------[Agent Step 629_488]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 1 / episode/length 15 / train/loss/con 0.02 / train/loss/dyn 4.34 / train/loss/image 3.63 / train/loss/policy 1.1e-3 / train/loss/rep 4.34 / train/loss/repval 1.27 / train/loss/rew 1.7e-3 / train/loss/value 1.14 / train/rand/action 0.23 / replay/replay_ratio 65 / fps/policy 681.99 / fps/train 4.4e4
+
+Writing metrics: /workspace/ext/logs/20261120_base_dk8_s1m_tr64/metrics.jsonl
+Writing metrics: /workspace/ext/logs/20261120_base_dk8_s1m_tr64/scores.jsonl

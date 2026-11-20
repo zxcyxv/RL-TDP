@@ -1,0 +1,10 @@
+{"delta_abs": 0.0, "delta_max": 0.0, "dsyn_norm": 0.0, "q_prev": 0.0, "calls": 500, "transfers": 16, "Wo_norm": 0.0, "Wg_norm": 22.609004974365234}
+{"delta_abs": 0.0, "delta_max": 0.0, "dsyn_norm": 0.0, "q_prev": 0.0, "calls": 1000, "transfers": 48, "Wo_norm": 0.0, "Wg_norm": 22.609004974365234}
+{"delta_abs": 0.0, "delta_max": 0.0, "dsyn_norm": 0.0, "q_prev": 0.0, "calls": 1500, "transfers": 80, "Wo_norm": 0.0, "Wg_norm": 22.609004974365234}
+{"delta_abs": 0.0, "delta_max": 0.0, "dsyn_norm": 0.0, "q_prev": 0.0, "calls": 2000, "transfers": 112, "Wo_norm": 0.0, "Wg_norm": 22.609004974365234}
+{"delta_abs": 0.0, "delta_max": 0.0, "dsyn_norm": 0.0, "q_prev": 0.0, "calls": 2500, "transfers": 144, "Wo_norm": 0.0, "Wg_norm": 22.609004974365234}
+{"delta_abs": 0.0, "delta_max": 0.0, "dsyn_norm": 0.0, "q_prev": 0.0, "calls": 3000, "transfers": 176, "Wo_norm": 0.0, "Wg_norm": 22.609004974365234}
+{"delta_abs": 0.0, "delta_max": 0.0, "dsyn_norm": 0.0, "q_prev": 0.0, "calls": 3500, "transfers": 208, "Wo_norm": 0.0, "Wg_norm": 22.609004974365234}
+{"delta_abs": 0.0, "delta_max": 0.0, "dsyn_norm": 0.0, "q_prev": 0.0, "calls": 4000, "transfers": 240, "Wo_norm": 0.0, "Wg_norm": 22.609004974365234}
+{"delta_abs": 0.0, "delta_max": 0.0, "dsyn_norm": 0.0, "q_prev": 0.0, "calls": 4500, "transfers": 272, "Wo_norm": 0.0, "Wg_norm": 22.609004974365234}
+{"delta_abs": 0.027669788282364608, "delta_max": 0.1240725870244205, "dsyn_norm": 3.382933659106493, "q_prev": 0.11938022457499756, "calls": 5000, "transfers": 304, "Wo_norm": 1.0689157247543335, "Wg_norm": 436.34423828125}

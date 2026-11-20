@@ -1,0 +1,88 @@
+---  ___                           __   ______ ---
+--- |   \ _ _ ___ __ _ _ __  ___ _ \ \ / /__ / ---
+--- | |) | '_/ -_) _` | '  \/ -_) '/\ V / |_ \ ---
+--- |___/|_| \___\__,_|_|_|_\___|_|  \_/ |___/ ---
+Replica: 0 / 1
+Logdir: /workspace/ext/logs/20261120_1319_q_dk8
+Run script: train
+Observations
+  image            Space(uint8, shape=(64, 64, 3), low=0, high=255)
+  reward           Space(float32, shape=(), low=-inf, high=inf)
+  is_first         Space(bool, shape=(), low=False, high=True)
+  is_last          Space(bool, shape=(), low=False, high=True)
+  is_terminal      Space(bool, shape=(), low=False, high=True)
+Actions
+  action           Space(int32, shape=(), low=0, high=7)
+Extras
+  consec           Space(int32, shape=(), low=-2147483648, high=2147483647)
+  stepid           Space(uint8, shape=(20,), low=0, high=255)
+  dyn/deter        Space(float32, shape=(512,), low=-inf, high=inf)
+  dyn/stoch        Space(float32, shape=(32, 4), low=-inf, high=inf)
+JAX devices (1): [cuda:0]
+Policy devices: cuda:0
+Train devices:  cuda:0
+Initializing parameters...
+Optimizer opt has 570,483 params:
+       376,768 dyn
+        80,595 dec
+        57,663 rew
+        41,153 con
+        14,304 enc
+Done initializing!
+Compiling 1 checkpoint groups...
+Largest checkpoint group: 0 GB
+Compiling train and report...
+W1120 13:20:45.815141   44944 cuda_timer.cc:88] Delay kernel timed out: measured time has sub-optimal accuracy. There may be a missing warmup execution, please investigate in Nsight Systems.
+W1120 13:20:49.652614   44944 cuda_timer.cc:88] Delay kernel timed out: measured time has sub-optimal accuracy. There may be a missing warmup execution, please investigate in Nsight Systems.
+Train cost analysis:
+No available
+Report cost analysis:
+No available
+Done compiling!
+Did not find any checkpoint.
+Saving checkpoint: /workspace/ext/logs/20261120_1319_q_dk8/ckpt/20261120T132112F567542
+Saved checkpoint.
+Start training loop
+Start JAX profiler: /workspace/ext/logs/20261120_1319_q_dk8
+Stop JAX profiler
+
+--------------------[Agent Step 64_320]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 0 / episode/length 257 / train/loss/con 0.05 / train/loss/dyn 4.34 / train/loss/image 121.94 / train/loss/rep 4.34 / train/loss/rew 1.23 / replay/replay_ratio 63.98 / fps/policy 490.87 / fps/train 3e4
+
+Writing metrics: /workspace/ext/logs/20261120_1319_q_dk8/metrics.jsonl
+Writing metrics: /workspace/ext/logs/20261120_1319_q_dk8/scores.jsonl
+Traceback (most recent call last):
+  File "/workspace/ext/dreamerv3/dreamerv3/main.py", line 295, in <module>
+    main()
+  File "/workspace/ext/dreamerv3/dreamerv3/main.py", line 70, in main
+    embodied.run.train(
+  File "/workspace/ext/dreamerv3/embodied/run/train.py", line 110, in train
+    driver(policy, steps=10)
+  File "/workspace/ext/dreamerv3/embodied/core/driver.py", line 54, in __call__
+    step, episode = self._step(policy, step, episode)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ext/dreamerv3/embodied/core/driver.py", line 70, in _step
+    self.carry, acts, outs = policy(self.carry, obs, **self.kwargs)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ext/dreamerv3/embodied/run/train.py", line 106, in <lambda>
+    policy = lambda *args: agent.policy(*args, mode='train')
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/contextlib.py", line 81, in inner
+    return func(*args, **kwds)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ext/dreamerv3/dreamerv3/qwrapper.py", line 80, in policy
+    assert all(x.all() for x in jax.tree.leaves(fin)), str(finite)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: {'Q': array([False, False, False, False, False, False, False, False, False,
+       False, False, False, False, False, False, False]), 'act/action': array([ True,  True,  True,  True,  True,  True,  True,  True,  True,
+        True,  True,  True,  True,  True,  True,  True]), 'feat/deter': array([ True,  True,  True,  True,  True,  True,  True,  True,  True,
+        True,  True,  True,  True,  True,  True,  True]), 'feat/logit': array([ True,  True,  True,  True,  True,  True,  True,  True,  True,
+        True,  True,  True,  True,  True,  True,  True]), 'feat/stoch': array([ True,  True,  True,  True,  True,  True,  True,  True,  True,
+        True,  True,  True,  True,  True,  True,  True]), 'obs/image': array([ True,  True,  True,  True,  True,  True,  True,  True,  True,
+        True,  True,  True,  True,  True,  True,  True]), 'obs/is_first': array([ True,  True,  True,  True,  True,  True,  True,  True,  True,
+        True,  True,  True,  True,  True,  True,  True]), 'obs/is_last': array([ True,  True,  True,  True,  True,  True,  True,  True,  True,
+        True,  True,  True,  True,  True,  True,  True]), 'obs/is_terminal': array([ True,  True,  True,  True,  True,  True,  True,  True,  True,
+        True,  True,  True,  True,  True,  True,  True]), 'obs/reward': array([ True,  True,  True,  True,  True,  True,  True,  True,  True,
+        True,  True,  True,  True,  True,  True,  True]), 'tokens': array([ True,  True,  True,  True,  True,  True,  True,  True,  True,
+        True,  True,  True,  True,  True,  True,  True])}

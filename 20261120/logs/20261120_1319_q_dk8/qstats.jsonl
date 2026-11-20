@@ -1,0 +1,10 @@
+{"delta_abs": 0.0, "delta_max": 0.0, "dsyn_norm": 0.0, "q_sel": 0.0, "transfers": 16.0, "u_std": 0.976004958152771, "calls": 500, "Wo_norm": 0.0, "Wg_norm": 22.609006881713867}
+{"delta_abs": 0.0, "delta_max": 0.0, "dsyn_norm": 0.0, "q_sel": 0.0, "transfers": 48.0, "u_std": 0.9892537593841553, "calls": 1000, "Wo_norm": 0.0, "Wg_norm": 22.609006881713867}
+{"delta_abs": 0.0, "delta_max": 0.0, "dsyn_norm": 0.0, "q_sel": 0.0, "transfers": 80.0, "u_std": 0.9888434410095215, "calls": 1500, "Wo_norm": 0.0, "Wg_norm": 22.609006881713867}
+{"delta_abs": 0.0, "delta_max": 0.0, "dsyn_norm": 0.0, "q_sel": 0.0, "transfers": 112.0, "u_std": 0.9878174066543579, "calls": 2000, "Wo_norm": 0.0, "Wg_norm": 22.609006881713867}
+{"delta_abs": 0.0, "delta_max": 0.0, "dsyn_norm": 0.0, "q_sel": 0.0, "transfers": 144.0, "u_std": 0.9832202196121216, "calls": 2500, "Wo_norm": 0.0, "Wg_norm": 22.609006881713867}
+{"delta_abs": 0.0, "delta_max": 0.0, "dsyn_norm": 0.0, "q_sel": 0.0, "transfers": 176.0, "u_std": 0.9794727563858032, "calls": 3000, "Wo_norm": 0.0, "Wg_norm": 22.609006881713867}
+{"delta_abs": 0.0, "delta_max": 0.0, "dsyn_norm": 0.0, "q_sel": 0.0, "transfers": 208.0, "u_std": 0.9808016419410706, "calls": 3500, "Wo_norm": 0.0, "Wg_norm": 22.609006881713867}
+{"delta_abs": 0.0, "delta_max": 0.0, "dsyn_norm": 0.0, "q_sel": 0.0, "transfers": 240.0, "u_std": 0.9848648309707642, "calls": 4000, "Wo_norm": 0.0, "Wg_norm": 22.609006881713867}
+{"delta_abs": 0.0, "delta_max": 0.0, "dsyn_norm": 0.0, "q_sel": 0.0, "transfers": 272.0, "u_std": 0.9860217571258545, "calls": 4500, "Wo_norm": 0.0, "Wg_norm": 22.609006881713867}
+{"delta_abs": 26.80255699157715, "delta_max": 203.31527709960938, "dsyn_norm": 10.19650650024414, "q_sel": 53.40150833129883, "transfers": 304.0, "u_std": 16.75334358215332, "calls": 5000, "Wo_norm": 144.4298858642578, "Wg_norm": 81.06163024902344}
