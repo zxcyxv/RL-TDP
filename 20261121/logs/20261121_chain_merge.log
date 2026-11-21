@@ -1,0 +1,14 @@
+start 20261121_1009_merge_eval_dk8_teacherA 10:09:39
+end 20261121_1009_merge_eval_dk8_teacherA exit 0 10:12:36
+start 20261121_1012_merge_learn_unlock 10:12:36
+end 20261121_1012_merge_learn_unlock exit 0 10:18:49
+start 20261121_1018_merge_eval_unlock_teacherB 10:18:49
+end 20261121_1018_merge_eval_unlock_teacherB exit 0 10:21:23
+start 20261121_1021_merge_eval_dk8_teacherB 10:21:23
+end 20261121_1021_merge_eval_dk8_teacherB exit 0 10:24:17
+merge 10:24:17
+merge exit 0 10:24:17
+start 20261121_1024_merge_eval_dk8_merged 10:24:17
+end 20261121_1024_merge_eval_dk8_merged exit 0 10:27:12
+start 20261121_1027_merge_eval_unlock_merged 10:27:12
+end 20261121_1027_merge_eval_unlock_merged exit 0 10:29:45

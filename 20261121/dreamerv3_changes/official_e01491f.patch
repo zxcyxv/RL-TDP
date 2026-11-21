@@ -1,5 +1,5 @@
 diff --git a/dreamerv3/configs.yaml b/dreamerv3/configs.yaml
-index 786b67e..d675a1b 100644
+index 786b67e..04ccb4d 100644
 --- a/dreamerv3/configs.yaml
 +++ b/dreamerv3/configs.yaml
 @@ -14,6 +14,7 @@ defaults:
@@ -45,7 +45,7 @@ index 786b67e..d675a1b 100644
      repval_grad: True
      report: True
      report_gradnorms: False
-+    q: {precision: '', freeze_wo: False, frozen: False, trace_cap: True, target: True, target_rate: 0.02, retnorm: False, ret_limit: 1.0, ret_rate: 0.01, ret_lo: 5.0, ret_hi: 95.0, tau_rel: 0.0, tau_rate: 0.01, wo_std: 0.0, trace_norm: False, env_mean: True, debug_outs: False, xnorm: True, gscale: 1.0, seed: 0, tau: 0.05, gamma: 0.99, lam: 0.9, beta: 0.3, eta: 0.02, eps: 1e-6, imag_updates: True, imag_length: 15, imag_beta: 0.05, imag_eta: 0.05}
++    q: {collect_xx: False, precision: '', freeze_wo: False, frozen: False, trace_cap: True, target: True, target_rate: 0.02, retnorm: False, ret_limit: 1.0, ret_rate: 0.01, ret_lo: 5.0, ret_hi: 95.0, tau_rel: 0.0, tau_rate: 0.01, wo_std: 0.0, trace_norm: False, env_mean: True, debug_outs: False, xnorm: True, gscale: 1.0, seed: 0, tau: 0.05, gamma: 0.99, lam: 0.9, beta: 0.3, eta: 0.02, eps: 1e-6, imag_updates: True, imag_length: 15, imag_beta: 0.05, imag_eta: 0.05}
  
  size1m: &size1m
    .*\.rssm: {deter: 512, hidden: 64, classes: 4}

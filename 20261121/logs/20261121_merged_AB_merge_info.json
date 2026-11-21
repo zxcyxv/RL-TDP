@@ -1,0 +1,26 @@
+{
+ "tasks": [
+  {
+   "ckpt": "/workspace/ext/logs/20261121_0412_q_dk8_target_tracenorm_eta02/ckpt_steps/01800000",
+   "xx": "/workspace/ext/logs/20261121_1009_merge_eval_dk8_teacherA/xx_stats.npz",
+   "n_inputs": 694722.0,
+   "C_trace": 511.9993968268844
+  },
+  {
+   "ckpt": "/workspace/ext/logs/20261121_1012_merge_learn_unlock/ckpt_steps/00500000",
+   "xx": "/workspace/ext/logs/20261121_1012_merge_learn_unlock/xx_stats.npz",
+   "n_inputs": 3482094.0,
+   "C_trace": 511.99931823263034
+  }
+ ],
+ "rank": 512,
+ "residual_max": 7.545075675352564e-13,
+ "dist_rel": {
+  "task0": 0.25696008526610203,
+  "task1": 0.25510489223776295
+ },
+ "unit_input_err_rel": {
+  "task0": 0.005093813152993922,
+  "task1": 0.004504531849058594
+ }
+}

@@ -382,6 +382,14 @@ class QAgent(DreamerAgent):
     qc['stats'] = jax.tree.map(lambda x: x.reshape((1,)), qc['stats'])
 
     out = {}
+    if q.collect_xx:
+      # Input statistics for the task-boundary consolidation of W_g:
+      # sum of x x^T over all candidate actions of every step whose action is
+      # executed (is_last steps excluded). Accumulated in float64 on the host
+      # by the wrapper and popped there (not passed to the driver).
+      m = 1.0 - obs['is_last'].astype(f32)
+      out['qxx/S'] = jnp.einsum('b,bad,bae->de', m, X, X)
+      out['qxx/n'] = (m.sum() * X.shape[1]).reshape((1,))  # rank-1 for sharding
     if q.debug_outs:
       out['qdbg/K'] = c[:, None, :] * s       # features for every action
       out['qdbg/Xn'] = X                       # normalized x for every action

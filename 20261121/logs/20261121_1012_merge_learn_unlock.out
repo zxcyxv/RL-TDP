@@ -1,0 +1,95 @@
+---  ___                           __   ______ ---
+--- |   \ _ _ ___ __ _ _ __  ___ _ \ \ / /__ / ---
+--- | |) | '_/ -_) _` | '  \/ -_) '/\ V / |_ \ ---
+--- |___/|_| \___\__,_|_|_|_\___|_|  \_/ |___/ ---
+Replica: 0 / 1
+Logdir: /workspace/ext/logs/20261121_1012_merge_learn_unlock
+Run script: train
+Observations
+  image            Space(uint8, shape=(64, 64, 3), low=0, high=255)
+  reward           Space(float32, shape=(), low=-inf, high=inf)
+  is_first         Space(bool, shape=(), low=False, high=True)
+  is_last          Space(bool, shape=(), low=False, high=True)
+  is_terminal      Space(bool, shape=(), low=False, high=True)
+Actions
+  action           Space(int32, shape=(), low=0, high=7)
+Extras
+  consec           Space(int32, shape=(), low=-2147483648, high=2147483647)
+  stepid           Space(uint8, shape=(20,), low=0, high=255)
+  dyn/deter        Space(float32, shape=(512,), low=-inf, high=inf)
+  dyn/stoch        Space(float32, shape=(32, 4), low=-inf, high=inf)
+JAX devices (1): [cuda:0]
+Policy devices: cuda:0
+Train devices:  cuda:0
+Initializing parameters...
+Optimizer opt has 570,483 params:
+       376,768 dyn
+        80,595 dec
+        57,663 rew
+        41,153 con
+        14,304 enc
+Done initializing!
+Compiling 1 checkpoint groups...
+Largest checkpoint group: 0 GB
+Compiling train and report...
+W1121 10:13:20.094870   47670 cuda_timer.cc:88] Delay kernel timed out: measured time has sub-optimal accuracy. There may be a missing warmup execution, please investigate in Nsight Systems.
+Train cost analysis:
+No available
+Report cost analysis:
+No available
+Done compiling!
+Did not find any checkpoint.
+Saving checkpoint: /workspace/ext/logs/20261121_1012_merge_learn_unlock/ckpt/20261121T101404F876867
+Saved checkpoint.
+Start training loop
+Saving checkpoint: /workspace/ext/logs/20261121_1012_merge_learn_unlock/ckpt/20261121T101507F632197
+Saved checkpoint.
+[progress] 50000: 75/221 successes, checkpoint saved
+Saving checkpoint: /workspace/ext/logs/20261121_1012_merge_learn_unlock/ckpt/20261121T101531F849450
+Saved checkpoint.
+[progress] 100000: 83/236 successes, checkpoint saved
+Saving checkpoint: /workspace/ext/logs/20261121_1012_merge_learn_unlock/ckpt/20261121T101556F294494
+Saved checkpoint.
+[progress] 150000: 108/250 successes, checkpoint saved
+Saving checkpoint: /workspace/ext/logs/20261121_1012_merge_learn_unlock/ckpt/20261121T101620F532099
+Saved checkpoint.
+[progress] 200000: 94/245 successes, checkpoint saved
+
+--------------------[Agent Step 201_936]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 1 / episode/length 124 / replay/replay_ratio 5.2e-3 / fps/policy 1460.1 / fps/train 0
+
+Writing metrics: /workspace/ext/logs/20261121_1012_merge_learn_unlock/metrics.jsonl
+Writing metrics: /workspace/ext/logs/20261121_1012_merge_learn_unlock/scores.jsonl
+Saving checkpoint: /workspace/ext/logs/20261121_1012_merge_learn_unlock/ckpt/20261121T101645F093426
+Saved checkpoint.
+[progress] 250000: 126/260 successes, checkpoint saved
+Saving checkpoint: /workspace/ext/logs/20261121_1012_merge_learn_unlock/ckpt/20261121T101709F307984
+Saved checkpoint.
+[progress] 300000: 142/270 successes, checkpoint saved
+Saving checkpoint: /workspace/ext/logs/20261121_1012_merge_learn_unlock/ckpt/20261121T101733F514254
+Saved checkpoint.
+[progress] 350000: 156/282 successes, checkpoint saved
+Saving checkpoint: /workspace/ext/logs/20261121_1012_merge_learn_unlock/ckpt/20261121T101757F693400
+Saved checkpoint.
+[progress] 400000: 122/262 successes, checkpoint saved
+Saving checkpoint: /workspace/ext/logs/20261121_1012_merge_learn_unlock/ckpt/20261121T101821F897103
+Saved checkpoint.
+[progress] 450000: 131/262 successes, checkpoint saved
+
+--------------------[Agent Step 450_464]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 1 / episode/length 135 / replay/replay_ratio 0 / fps/policy 2066.83 / fps/train 0
+
+Writing metrics: /workspace/ext/logs/20261121_1012_merge_learn_unlock/scores.jsonl
+Writing metrics: /workspace/ext/logs/20261121_1012_merge_learn_unlock/metrics.jsonl
+Saving checkpoint: /workspace/ext/logs/20261121_1012_merge_learn_unlock/ckpt/20261121T101846F603097
+Saved checkpoint.
+[progress] 500000: 141/270 successes, checkpoint saved
+
+--------------------[Agent Step 499_817]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 1 / episode/length 73
+
+Writing metrics: /workspace/ext/logs/20261121_1012_merge_learn_unlock/metrics.jsonl
+Writing metrics: /workspace/ext/logs/20261121_1012_merge_learn_unlock/scores.jsonl

@@ -29,6 +29,16 @@ class QAgentWrapper:
     self.calls = 0
     self.pending_stats = []
     self.qc = None
+    # input statistics for W_g consolidation (agent.q.collect_xx)
+    self.xx_path = elements.Path(logdir) / 'xx_stats.npz'
+    self.xx_sum = None
+    self.xx_n = 0.0
+    import atexit
+    atexit.register(self._save_xx)
+
+  def _save_xx(self):
+    if self.xx_sum is not None:
+      np.savez(str(self.xx_path), S=self.xx_sum, n=self.xx_n, calls=self.calls)
 
   def __getattr__(self, name):
     return getattr(self.agent, name)
@@ -80,6 +90,12 @@ class QAgentWrapper:
         self._set(self.qc['Wg_new'], self.qc['Wo_new'])
     acts, outs = a._take_outs(internal.fetch_async((acts, outs)))
     carry = a._split(internal.to_local(gcarry[:4]))
+    if 'qxx/S' in outs:
+      S = np.asarray(outs.pop('qxx/S'), np.float64)
+      n = float(np.asarray(outs.pop('qxx/n')).sum())
+      S = S.reshape(S.shape[-2:]) if S.ndim > 2 else S
+      self.xx_sum = S if self.xx_sum is None else self.xx_sum + S
+      self.xx_n += n
     finite = outs.pop('finite', {})
     for key, fin in finite.items():
       assert all(x.all() for x in jax.tree.leaves(fin)), str(finite)
@@ -108,6 +124,7 @@ class QAgentWrapper:
       with self.path.open('a') as f:
         f.write(json.dumps(rec) + '\n')
       self.pending_stats = []
+      self._save_xx()
     return carry, acts, outs
 
   def train(self, carry, data):

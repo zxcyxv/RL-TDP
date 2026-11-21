@@ -1,0 +1,58 @@
+---  ___                           __   ______ ---
+--- |   \ _ _ ___ __ _ _ __  ___ _ \ \ / /__ / ---
+--- | |) | '_/ -_) _` | '  \/ -_) '/\ V / |_ \ ---
+--- |___/|_| \___\__,_|_|_|_\___|_|  \_/ |___/ ---
+Replica: 0 / 1
+Logdir: /workspace/ext/logs/20261121_1009_merge_eval_dk8_teacherA
+Run script: train
+Observations
+  image            Space(uint8, shape=(64, 64, 3), low=0, high=255)
+  reward           Space(float32, shape=(), low=-inf, high=inf)
+  is_first         Space(bool, shape=(), low=False, high=True)
+  is_last          Space(bool, shape=(), low=False, high=True)
+  is_terminal      Space(bool, shape=(), low=False, high=True)
+Actions
+  action           Space(int32, shape=(), low=0, high=7)
+Extras
+  consec           Space(int32, shape=(), low=-2147483648, high=2147483647)
+  stepid           Space(uint8, shape=(20,), low=0, high=255)
+  dyn/deter        Space(float32, shape=(512,), low=-inf, high=inf)
+  dyn/stoch        Space(float32, shape=(32, 4), low=-inf, high=inf)
+JAX devices (1): [cuda:0]
+Policy devices: cuda:0
+Train devices:  cuda:0
+Initializing parameters...
+Optimizer opt has 570,483 params:
+       376,768 dyn
+        80,595 dec
+        57,663 rew
+        41,153 con
+        14,304 enc
+Done initializing!
+Compiling 1 checkpoint groups...
+Largest checkpoint group: 0 GB
+Compiling train and report...
+W1121 10:10:23.403410   46511 cuda_timer.cc:88] Delay kernel timed out: measured time has sub-optimal accuracy. There may be a missing warmup execution, please investigate in Nsight Systems.
+W1121 10:10:41.634624   46510 cuda_timer.cc:88] Delay kernel timed out: measured time has sub-optimal accuracy. There may be a missing warmup execution, please investigate in Nsight Systems.
+Train cost analysis:
+No available
+Report cost analysis:
+No available
+Done compiling!
+Did not find any checkpoint.
+Saving checkpoint: /workspace/ext/logs/20261121_1009_merge_eval_dk8_teacherA/ckpt/20261121T101107F399666
+Saved checkpoint.
+Start training loop
+Saving checkpoint: /workspace/ext/logs/20261121_1009_merge_eval_dk8_teacherA/ckpt/20261121T101208F344810
+Saved checkpoint.
+[progress] 50000: 328/379 successes, checkpoint saved
+Saving checkpoint: /workspace/ext/logs/20261121_1009_merge_eval_dk8_teacherA/ckpt/20261121T101233F085984
+Saved checkpoint.
+[progress] 100000: 324/375 successes, checkpoint saved
+
+--------------------[Agent Step 99_706]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 1 / episode/length 55
+
+Writing metrics: /workspace/ext/logs/20261121_1009_merge_eval_dk8_teacherA/scores.jsonl
+Writing metrics: /workspace/ext/logs/20261121_1009_merge_eval_dk8_teacherA/metrics.jsonl
