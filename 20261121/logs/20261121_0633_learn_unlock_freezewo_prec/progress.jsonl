@@ -1,0 +1,10 @@
+{"step": 50000, "episodes": 218, "successes": 74, "success_frac": 0.3394495412844037, "mean_score": 0.3394495412844037, "mean_length": 219.37614678899084}
+{"step": 100000, "episodes": 230, "successes": 83, "success_frac": 0.36086956521739133, "mean_score": 0.36086956521739133, "mean_length": 216.6695652173913}
+{"step": 150000, "episodes": 242, "successes": 91, "success_frac": 0.3760330578512397, "mean_score": 0.3760330578512397, "mean_length": 207.8595041322314}
+{"step": 200000, "episodes": 245, "successes": 104, "success_frac": 0.42448979591836733, "mean_score": 0.42448979591836733, "mean_length": 202.84489795918367}
+{"step": 250000, "episodes": 245, "successes": 96, "success_frac": 0.39183673469387753, "mean_score": 0.39183673469387753, "mean_length": 207.94285714285715}
+{"step": 300000, "episodes": 236, "successes": 89, "success_frac": 0.3771186440677966, "mean_score": 0.3771186440677966, "mean_length": 210.19915254237287}
+{"step": 350000, "episodes": 248, "successes": 100, "success_frac": 0.4032258064516129, "mean_score": 0.4032258064516129, "mean_length": 201.59677419354838}
+{"step": 400000, "episodes": 238, "successes": 91, "success_frac": 0.38235294117647056, "mean_score": 0.38235294117647056, "mean_length": 207.8781512605042}
+{"step": 450000, "episodes": 255, "successes": 109, "success_frac": 0.42745098039215684, "mean_score": 0.42745098039215684, "mean_length": 198.0705882352941}
+{"step": 500000, "episodes": 245, "successes": 105, "success_frac": 0.42857142857142855, "mean_score": 0.42857142857142855, "mean_length": 202.6122448979592}

@@ -1,0 +1,78 @@
+---  ___                           __   ______ ---
+--- |   \ _ _ ___ __ _ _ __  ___ _ \ \ / /__ / ---
+--- | |) | '_/ -_) _` | '  \/ -_) '/\ V / |_ \ ---
+--- |___/|_| \___\__,_|_|_|_\___|_|  \_/ |___/ ---
+Replica: 0 / 1
+Logdir: /workspace/ext/logs/20261121_0521_learn_unlock
+Run script: train
+Observations
+  image            Space(uint8, shape=(64, 64, 3), low=0, high=255)
+  reward           Space(float32, shape=(), low=-inf, high=inf)
+  is_first         Space(bool, shape=(), low=False, high=True)
+  is_last          Space(bool, shape=(), low=False, high=True)
+  is_terminal      Space(bool, shape=(), low=False, high=True)
+Actions
+  action           Space(int32, shape=(), low=0, high=7)
+Extras
+  consec           Space(int32, shape=(), low=-2147483648, high=2147483647)
+  stepid           Space(uint8, shape=(20,), low=0, high=255)
+  dyn/deter        Space(float32, shape=(512,), low=-inf, high=inf)
+  dyn/stoch        Space(float32, shape=(32, 4), low=-inf, high=inf)
+JAX devices (1): [cuda:0]
+Policy devices: cuda:0
+Train devices:  cuda:0
+Initializing parameters...
+Optimizer opt has 570,483 params:
+       376,768 dyn
+        80,595 dec
+        57,663 rew
+        41,153 con
+        14,304 enc
+Done initializing!
+Compiling 1 checkpoint groups...
+Largest checkpoint group: 0 GB
+Compiling train and report...
+Train cost analysis:
+No available
+Report cost analysis:
+No available
+Done compiling!
+Found existing checkpoint.
+Loading checkpoint: /workspace/ext/logs/20261121_0521_learn_unlock/ckpt/20261121T052504F969823
+Loaded checkpoint.
+Start training loop
+Saving checkpoint: /workspace/ext/logs/20261121_0521_learn_unlock/ckpt/20261121T053207F120238
+Saved checkpoint.
+[progress] 200016: 0/0 successes, checkpoint saved
+Saving checkpoint: /workspace/ext/logs/20261121_0521_learn_unlock/ckpt/20261121T053251F682695
+Saved checkpoint.
+[progress] 250000: 105/246 successes, checkpoint saved
+Saving checkpoint: /workspace/ext/logs/20261121_0521_learn_unlock/ckpt/20261121T053315F539940
+Saved checkpoint.
+[progress] 300000: 131/263 successes, checkpoint saved
+Saving checkpoint: /workspace/ext/logs/20261121_0521_learn_unlock/ckpt/20261121T053339F287627
+Saved checkpoint.
+[progress] 350000: 140/272 successes, checkpoint saved
+Saving checkpoint: /workspace/ext/logs/20261121_0521_learn_unlock/ckpt/20261121T053403F269529
+Saved checkpoint.
+[progress] 400000: 117/257 successes, checkpoint saved
+
+--------------------[Agent Step 405_120]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 0 / episode/length 265 / replay/replay_ratio 5.1e-3 / fps/policy 1482.87 / fps/train 0
+
+Writing metrics: /workspace/ext/logs/20261121_0521_learn_unlock/metrics.jsonlWriting metrics: /workspace/ext/logs/20261121_0521_learn_unlock/scores.jsonl
+
+Saving checkpoint: /workspace/ext/logs/20261121_0521_learn_unlock/ckpt/20261121T053427F441508
+Saved checkpoint.
+[progress] 450000: 115/254 successes, checkpoint saved
+Saving checkpoint: /workspace/ext/logs/20261121_0521_learn_unlock/ckpt/20261121T053451F180933
+Saved checkpoint.
+[progress] 500000: 145/270 successes, checkpoint saved
+
+--------------------[Agent Step 499_939]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 1 / episode/length 174
+
+Writing metrics: /workspace/ext/logs/20261121_0521_learn_unlock/scores.jsonl
+Writing metrics: /workspace/ext/logs/20261121_0521_learn_unlock/metrics.jsonl

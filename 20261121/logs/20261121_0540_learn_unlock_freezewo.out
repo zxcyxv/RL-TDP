@@ -1,0 +1,96 @@
+---  ___                           __   ______ ---
+--- |   \ _ _ ___ __ _ _ __  ___ _ \ \ / /__ / ---
+--- | |) | '_/ -_) _` | '  \/ -_) '/\ V / |_ \ ---
+--- |___/|_| \___\__,_|_|_|_\___|_|  \_/ |___/ ---
+Replica: 0 / 1
+Logdir: /workspace/ext/logs/20261121_0540_learn_unlock_freezewo
+Run script: train
+Observations
+  image            Space(uint8, shape=(64, 64, 3), low=0, high=255)
+  reward           Space(float32, shape=(), low=-inf, high=inf)
+  is_first         Space(bool, shape=(), low=False, high=True)
+  is_last          Space(bool, shape=(), low=False, high=True)
+  is_terminal      Space(bool, shape=(), low=False, high=True)
+Actions
+  action           Space(int32, shape=(), low=0, high=7)
+Extras
+  consec           Space(int32, shape=(), low=-2147483648, high=2147483647)
+  stepid           Space(uint8, shape=(20,), low=0, high=255)
+  dyn/deter        Space(float32, shape=(512,), low=-inf, high=inf)
+  dyn/stoch        Space(float32, shape=(32, 4), low=-inf, high=inf)
+JAX devices (1): [cuda:0]
+Policy devices: cuda:0
+Train devices:  cuda:0
+Initializing parameters...
+Optimizer opt has 570,483 params:
+       376,768 dyn
+        80,595 dec
+        57,663 rew
+        41,153 con
+        14,304 enc
+Done initializing!
+Compiling 1 checkpoint groups...
+Largest checkpoint group: 0 GB
+Compiling train and report...
+W1121 05:41:05.761245   29805 cuda_timer.cc:88] Delay kernel timed out: measured time has sub-optimal accuracy. There may be a missing warmup execution, please investigate in Nsight Systems.
+W1121 05:41:11.802800   29806 cuda_timer.cc:88] Delay kernel timed out: measured time has sub-optimal accuracy. There may be a missing warmup execution, please investigate in Nsight Systems.
+Train cost analysis:
+No available
+Report cost analysis:
+No available
+Done compiling!
+Did not find any checkpoint.
+Saving checkpoint: /workspace/ext/logs/20261121_0540_learn_unlock_freezewo/ckpt/20261121T054136F555406
+Saved checkpoint.
+Start training loop
+Saving checkpoint: /workspace/ext/logs/20261121_0540_learn_unlock_freezewo/ckpt/20261121T054238F382046
+Saved checkpoint.
+[progress] 50000: 82/222 successes, checkpoint saved
+Saving checkpoint: /workspace/ext/logs/20261121_0540_learn_unlock_freezewo/ckpt/20261121T054302F196740
+Saved checkpoint.
+[progress] 100000: 97/244 successes, checkpoint saved
+Saving checkpoint: /workspace/ext/logs/20261121_0540_learn_unlock_freezewo/ckpt/20261121T054326F130762
+Saved checkpoint.
+[progress] 150000: 125/265 successes, checkpoint saved
+Saving checkpoint: /workspace/ext/logs/20261121_0540_learn_unlock_freezewo/ckpt/20261121T054350F051110
+Saved checkpoint.
+[progress] 200000: 113/257 successes, checkpoint saved
+
+--------------------[Agent Step 204_592]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 1 / episode/length 46 / replay/replay_ratio 5.1e-3 / fps/policy 1489.61 / fps/train 0
+
+Writing metrics: /workspace/ext/logs/20261121_0540_learn_unlock_freezewo/metrics.jsonl
+Writing metrics: /workspace/ext/logs/20261121_0540_learn_unlock_freezewo/scores.jsonl
+Saving checkpoint: /workspace/ext/logs/20261121_0540_learn_unlock_freezewo/ckpt/20261121T054414F295050
+Saved checkpoint.
+[progress] 250000: 126/264 successes, checkpoint saved
+Saving checkpoint: /workspace/ext/logs/20261121_0540_learn_unlock_freezewo/ckpt/20261121T054438F106796
+Saved checkpoint.
+[progress] 300000: 152/279 successes, checkpoint saved
+Saving checkpoint: /workspace/ext/logs/20261121_0540_learn_unlock_freezewo/ckpt/20261121T054501F896437
+Saved checkpoint.
+[progress] 350000: 107/247 successes, checkpoint saved
+Saving checkpoint: /workspace/ext/logs/20261121_0540_learn_unlock_freezewo/ckpt/20261121T054525F710795
+Saved checkpoint.
+[progress] 400000: 126/265 successes, checkpoint saved
+Saving checkpoint: /workspace/ext/logs/20261121_0540_learn_unlock_freezewo/ckpt/20261121T054549F476160
+Saved checkpoint.
+[progress] 450000: 140/277 successes, checkpoint saved
+
+--------------------[Agent Step 455_888]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 1 / episode/length 91 / replay/replay_ratio 0 / fps/policy 2094.28 / fps/train 0
+
+Writing metrics: /workspace/ext/logs/20261121_0540_learn_unlock_freezewo/metrics.jsonl
+Writing metrics: /workspace/ext/logs/20261121_0540_learn_unlock_freezewo/scores.jsonl
+Saving checkpoint: /workspace/ext/logs/20261121_0540_learn_unlock_freezewo/ckpt/20261121T054613F752089
+Saved checkpoint.
+[progress] 500000: 146/274 successes, checkpoint saved
+
+--------------------[Agent Step 499_979]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 1 / episode/length 58
+
+Writing metrics: /workspace/ext/logs/20261121_0540_learn_unlock_freezewo/scores.jsonl
+Writing metrics: /workspace/ext/logs/20261121_0540_learn_unlock_freezewo/metrics.jsonl

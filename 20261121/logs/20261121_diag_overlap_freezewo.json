@@ -1,0 +1,39 @@
+{
+ "Wo_change_rel": 0.0,
+ "Wg_change_rel": 0.05090635909047745,
+ "A_states": 24000,
+ "A_successes": 156,
+ "B_states": 24000,
+ "B_successes": 63,
+ "oldtask_all": {
+  "n": 24000,
+  "Q_before_mean": 0.3842110515116118,
+  "dQ_mean": -0.11461230697558919,
+  "dQ_abs_mean": 0.1374809453497616,
+  "action_gap_before_abs_mean": 0.048002343518770044,
+  "action_gap_change_abs_mean": 0.023358613143626007,
+  "policy_KL_mean": 0.07941907836814581,
+  "argmax_changed_frac": 0.39775,
+  "first_order_corr": 0.9919787431437875,
+  "units_participation_ratio_mean": 20.32848324995698
+ },
+ "oldtask_near_goal": {
+  "n": 1560,
+  "Q_before_mean": 0.7560976169581929,
+  "dQ_mean": -0.45252895968160306,
+  "dQ_abs_mean": 0.4543145268049478,
+  "action_gap_before_abs_mean": 0.08579997377102526,
+  "action_gap_change_abs_mean": 0.052650905372678504,
+  "policy_KL_mean": 0.11231349015969516,
+  "argmax_changed_frac": 0.4391025641025641,
+  "first_order_corr": 0.9787385746315069,
+  "units_participation_ratio_mean": 8.25988773539365
+ },
+ "overlap": {
+  "unit_cos_old_new": 0.12607612262136486,
+  "unit_cos_old_old": 0.15102738376712715,
+  "input_cos_old_new": 0.049953725188970566,
+  "input_cos_old_old": 0.07456853240728378,
+  "c_active_frac_abs_gt_0.1rms": 0.9042080078125
+ }
+}

@@ -1,0 +1,2 @@
+{"step": 50000, "episodes": 379, "successes": 328, "success_frac": 0.8654353562005277, "mean_score": 0.8654353562005277, "mean_length": 126.30079155672823}
+{"step": 100000, "episodes": 375, "successes": 324, "success_frac": 0.864, "mean_score": 0.864, "mean_length": 135.17333333333335}

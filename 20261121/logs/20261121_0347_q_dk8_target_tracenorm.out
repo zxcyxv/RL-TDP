@@ -1,0 +1,155 @@
+---  ___                           __   ______ ---
+--- |   \ _ _ ___ __ _ _ __  ___ _ \ \ / /__ / ---
+--- | |) | '_/ -_) _` | '  \/ -_) '/\ V / |_ \ ---
+--- |___/|_| \___\__,_|_|_|_\___|_|  \_/ |___/ ---
+Replica: 0 / 1
+Logdir: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm
+Run script: train
+Observations
+  image            Space(uint8, shape=(64, 64, 3), low=0, high=255)
+  reward           Space(float32, shape=(), low=-inf, high=inf)
+  is_first         Space(bool, shape=(), low=False, high=True)
+  is_last          Space(bool, shape=(), low=False, high=True)
+  is_terminal      Space(bool, shape=(), low=False, high=True)
+Actions
+  action           Space(int32, shape=(), low=0, high=7)
+Extras
+  consec           Space(int32, shape=(), low=-2147483648, high=2147483647)
+  stepid           Space(uint8, shape=(20,), low=0, high=255)
+  dyn/deter        Space(float32, shape=(512,), low=-inf, high=inf)
+  dyn/stoch        Space(float32, shape=(32, 4), low=-inf, high=inf)
+JAX devices (1): [cuda:0]
+Policy devices: cuda:0
+Train devices:  cuda:0
+Initializing parameters...
+Optimizer opt has 570,483 params:
+       376,768 dyn
+        80,595 dec
+        57,663 rew
+        41,153 con
+        14,304 enc
+Done initializing!
+Compiling 1 checkpoint groups...
+Largest checkpoint group: 0 GB
+Compiling train and report...
+W1121 03:48:12.750866   14898 cuda_timer.cc:88] Delay kernel timed out: measured time has sub-optimal accuracy. There may be a missing warmup execution, please investigate in Nsight Systems.
+Train cost analysis:
+No available
+Report cost analysis:
+No available
+Done compiling!
+Did not find any checkpoint.
+Saving checkpoint: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/ckpt/20261121T034839F809772
+Saved checkpoint.
+Start training loop
+Start JAX profiler: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm
+Stop JAX profiler
+
+--------------------[Agent Step 76_240]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 0 / episode/length 257 / train/loss/con 0.05 / train/loss/dyn 3.98 / train/loss/image 104.05 / train/loss/rep 3.98 / train/loss/rew 1.04 / replay/replay_ratio 64.14 / fps/policy 572.37 / fps/train 3.6e4
+
+Writing metrics: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/metrics.jsonl
+Writing metrics: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/scores.jsonl
+Saving checkpoint: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/ckpt/20261121T035122F615440
+Saved checkpoint.
+[progress] 100000: 2/384 successes, checkpoint saved
+
+--------------------[Agent Step 170_128]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 0 / episode/length 257 / train/loss/con 0.02 / train/loss/dyn 1.71 / train/loss/image 7.92 / train/loss/rep 1.71 / train/loss/rew 2.2e-3 / replay/replay_ratio 65 / fps/policy 782.39 / fps/train 5e4
+
+Writing metrics: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/metrics.jsonl
+Writing metrics: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/scores.jsonl
+Saving checkpoint: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/ckpt/20261121T035330F090094
+Saved checkpoint.
+[progress] 200000: 5/389 successes, checkpoint saved
+
+--------------------[Agent Step 264_208]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 0 / episode/length 257 / train/loss/con 0.02 / train/loss/dyn 1.93 / train/loss/image 6.47 / train/loss/rep 1.93 / train/loss/rew 4.7e-4 / replay/replay_ratio 65 / fps/policy 783.96 / fps/train 5e4
+
+Writing metrics: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/metrics.jsonl
+Writing metrics: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/scores.jsonl
+Saving checkpoint: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/ckpt/20261121T035538F132760
+Saved checkpoint.
+[progress] 300000: 0/386 successes, checkpoint saved
+
+--------------------[Agent Step 357_936]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 0 / episode/length 257 / train/loss/con 0.02 / train/loss/dyn 2.39 / train/loss/image 5.51 / train/loss/rep 2.39 / train/loss/rew 2e-4 / replay/replay_ratio 65 / fps/policy 780.97 / fps/train 5e4
+
+Writing metrics: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/metrics.jsonl
+Writing metrics: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/scores.jsonl
+Saving checkpoint: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/ckpt/20261121T035745F154042
+Saved checkpoint.
+[progress] 400000: 7/394 successes, checkpoint saved
+
+--------------------[Agent Step 451_728]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 0 / episode/length 257 / train/loss/con 0.02 / train/loss/dyn 3.12 / train/loss/image 4.57 / train/loss/rep 3.12 / train/loss/rew 1.5e-4 / replay/replay_ratio 65 / fps/policy 780.33 / fps/train 5e4
+
+Writing metrics: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/metrics.jsonl
+Writing metrics: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/scores.jsonl
+Saving checkpoint: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/ckpt/20261121T035954F452198
+Saved checkpoint.
+[progress] 500000: 15/396 successes, checkpoint saved
+
+--------------------[Agent Step 543_536]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 0 / episode/length 257 / train/loss/con 0.02 / train/loss/dyn 3.81 / train/loss/image 3.55 / train/loss/rep 3.81 / train/loss/rew 1.7e-4 / replay/replay_ratio 65 / fps/policy 765.61 / fps/train 4.9e4
+
+Writing metrics: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/metrics.jsonlWriting metrics: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/scores.jsonl
+
+Saving checkpoint: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/ckpt/20261121T040204F596991
+Saved checkpoint.
+[progress] 600000: 18/399 successes, checkpoint saved
+
+--------------------[Agent Step 636_256]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 0 / episode/length 257 / train/loss/con 0.02 / train/loss/dyn 4.24 / train/loss/image 2.73 / train/loss/rep 4.24 / train/loss/rew 1.7e-4 / replay/replay_ratio 65 / fps/policy 772.33 / fps/train 4.9e4
+
+Writing metrics: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/metrics.jsonlWriting metrics: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/scores.jsonl
+
+Saving checkpoint: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/ckpt/20261121T040352F913459
+Saved checkpoint.
+Saving checkpoint: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/ckpt/20261121T040416F109919
+Saved checkpoint.
+[progress] 700000: 21/397 successes, checkpoint saved
+
+--------------------[Agent Step 728_784]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 0 / episode/length 257 / train/loss/con 0.02 / train/loss/dyn 4.32 / train/loss/image 2.13 / train/loss/rep 4.32 / train/loss/rew 1.7e-4 / replay/replay_ratio 65 / fps/policy 771.22 / fps/train 4.9e4
+
+Writing metrics: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/metrics.jsonl
+Writing metrics: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/scores.jsonl
+Saving checkpoint: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/ckpt/20261121T040623F392562
+Saved checkpoint.
+[progress] 800000: 19/406 successes, checkpoint saved
+
+--------------------[Agent Step 821_184]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 0 / episode/length 257 / train/loss/con 0.02 / train/loss/dyn 4.04 / train/loss/image 1.64 / train/loss/rep 4.04 / train/loss/rew 1.7e-4 / replay/replay_ratio 65 / fps/policy 770.29 / fps/train 4.9e4
+
+Writing metrics: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/scores.jsonl
+Writing metrics: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/metrics.jsonl
+Saving checkpoint: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/ckpt/20261121T040832F342860
+Saved checkpoint.
+[progress] 900000: 20/397 successes, checkpoint saved
+
+--------------------[Agent Step 913_808]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 0 / episode/length 257 / train/loss/con 0.02 / train/loss/dyn 3.5 / train/loss/image 1.29 / train/loss/rep 3.5 / train/loss/rew 1.6e-4 / replay/replay_ratio 65 / fps/policy 771.42 / fps/train 4.9e4
+
+Writing metrics: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/metrics.jsonlWriting metrics: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/scores.jsonl
+
+Saving checkpoint: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/ckpt/20261121T041041F872522
+Saved checkpoint.
+[progress] 1000000: 38/411 successes, checkpoint saved
+
+--------------------[Agent Step 999_972]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 0 / episode/length 257
+
+Writing metrics: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/scores.jsonl
+Writing metrics: /workspace/ext/logs/20261121_0347_q_dk8_target_tracenorm/metrics.jsonl

@@ -1,0 +1,6 @@
+- [No unsupported performance verdicts](dont-trust-own-docs.md) — report raw numbers only; verdicts need user-set criteria; never in handovers
+- [Daily folder structure](daily-folder-structure.md) — shared utils folder(s) + one folder per day; records/handover cut per day
+- [User terminology](user-terminology.md) — read terms by project intent ("BPTT 없이" = no backprop); no nitpicking correct paraphrases
+- [Run naming](run-naming.md) — no v1/v2 labels; name runs by date_starttime_agent_task
+- [Explain concretely](explain-concretely.md) — concrete example + standard term, few lines; no coined phrases or speculative chains
+- [Experiment run rules](experiment-run-rules.md) — ask before launching; background; one run at a time (RAM); step ckpts + progress; 500k budget

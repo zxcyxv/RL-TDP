@@ -1,0 +1,85 @@
+---  ___                           __   ______ ---
+--- |   \ _ _ ___ __ _ _ __  ___ _ \ \ / /__ / ---
+--- | |) | '_/ -_) _` | '  \/ -_) '/\ V / |_ \ ---
+--- |___/|_| \___\__,_|_|_|_\___|_|  \_/ |___/ ---
+Replica: 0 / 1
+Logdir: /workspace/ext/logs/20261121_0323_q_dk8_tracenorm_from1M
+Run script: train
+Observations
+  image            Space(uint8, shape=(64, 64, 3), low=0, high=255)
+  reward           Space(float32, shape=(), low=-inf, high=inf)
+  is_first         Space(bool, shape=(), low=False, high=True)
+  is_last          Space(bool, shape=(), low=False, high=True)
+  is_terminal      Space(bool, shape=(), low=False, high=True)
+Actions
+  action           Space(int32, shape=(), low=0, high=7)
+Extras
+  consec           Space(int32, shape=(), low=-2147483648, high=2147483647)
+  stepid           Space(uint8, shape=(20,), low=0, high=255)
+  dyn/deter        Space(float32, shape=(512,), low=-inf, high=inf)
+  dyn/stoch        Space(float32, shape=(32, 4), low=-inf, high=inf)
+JAX devices (1): [cuda:0]
+Policy devices: cuda:0
+Train devices:  cuda:0
+Initializing parameters...
+Optimizer opt has 570,483 params:
+       376,768 dyn
+        80,595 dec
+        57,663 rew
+        41,153 con
+        14,304 enc
+Done initializing!
+Compiling 1 checkpoint groups...
+Largest checkpoint group: 0 GB
+Compiling train and report...
+Train cost analysis:
+No available
+Report cost analysis:
+No available
+Done compiling!
+Did not find any checkpoint.
+Saving checkpoint: /workspace/ext/logs/20261121_0323_q_dk8_tracenorm_from1M/ckpt/20261121T032519F709133
+Saved checkpoint.
+Start training loop
+
+--------------------[Agent Step 81_056]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 0 / episode/length 257 / train/loss/con 0.02 / train/loss/dyn 3.69 / train/loss/image 2.1 / train/loss/rep 3.69 / train/loss/rew 3.4e-3 / replay/replay_ratio 64.19 / fps/policy 608.74 / fps/train 3.8e4
+
+Writing metrics: /workspace/ext/logs/20261121_0323_q_dk8_tracenorm_from1M/metrics.jsonl
+Writing metrics: /workspace/ext/logs/20261121_0323_q_dk8_tracenorm_from1M/scores.jsonl
+Saving checkpoint: /workspace/ext/logs/20261121_0323_q_dk8_tracenorm_from1M/ckpt/20261121T032755F708460
+Saved checkpoint.
+[progress] 100000: 320/548 successes, checkpoint saved
+
+--------------------[Agent Step 177_808]--------------------
+Metrics filtered by: 'score|length|fps|ratio|train/loss/|train/rand/'
+episode/score 0 / episode/length 257 / train/loss/con 0.02 / train/loss/dyn 3.44 / train/loss/image 1.62 / train/loss/rep 3.44 / train/loss/rew 2.5e-3 / replay/replay_ratio 65 / fps/policy 806.17 / fps/train 5.2e4
+
+Writing metrics: /workspace/ext/logs/20261121_0323_q_dk8_tracenorm_from1M/metrics.jsonl
+Writing metrics: /workspace/ext/logs/20261121_0323_q_dk8_tracenorm_from1M/scores.jsonl
+Saving checkpoint: /workspace/ext/logs/20261121_0323_q_dk8_tracenorm_from1M/ckpt/20261121T032959F537985
+Saved checkpoint.
+[progress] 200000: 396/595 successes, checkpoint saved
+Traceback (most recent call last):
+  File "/workspace/ext/dreamerv3/dreamerv3/main.py", line 295, in <module>
+    main()
+  File "/workspace/ext/dreamerv3/dreamerv3/main.py", line 70, in main
+    embodied.run.train(
+  File "/workspace/ext/dreamerv3/embodied/run/train.py", line 110, in train
+    driver(policy, steps=10)
+  File "/workspace/ext/dreamerv3/embodied/core/driver.py", line 54, in __call__
+    step, episode = self._step(policy, step, episode)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ext/dreamerv3/embodied/core/driver.py", line 80, in _step
+    [fn(trn, i, **self.kwargs) for fn in self.callbacks]
+     ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/contextlib.py", line 81, in inner
+    return func(*args, **kwds)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ext/dreamerv3/embodied/core/replay.py", line 95, in add
+    chunk.append(step)
+  File "/workspace/ext/dreamerv3/embodied/core/chunk.py", line 49, in append
+    self.data[key][self.length] = value
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^
+KeyboardInterrupt

@@ -1,0 +1,252 @@
+diff --git a/dreamerv3/configs.yaml b/dreamerv3/configs.yaml
+index 786b67e..d675a1b 100644
+--- a/dreamerv3/configs.yaml
++++ b/dreamerv3/configs.yaml
+@@ -14,6 +14,7 @@ defaults:
+   consec_report: 1
+   replay_context: 1
+   random_agent: False
++  agent_type: dreamer
+   clock_addr: ''
+   clock_port: ''
+   ipv6: False
+@@ -35,6 +36,7 @@ defaults:
+     minecraft: {size: [64, 64], break_speed: 100.0, logs: False, length: 36000}
+     dmc: {size: [64, 64], repeat: 1, proprio: True, image: True, camera: -1}
+     loconav: {size: [64, 64], repeat: 1, camera: -1}
++    navix: {size: [64, 64], use_seed: True}
+ 
+   replay:
+     size: 5e6
+@@ -52,11 +54,13 @@ defaults:
+     log_every: 120
+     report_every: 300
+     save_every: 900
++    save_steps: 0
+     envs: 16
+     eval_envs: 4
+     eval_eps: 1
+     report_batches: 1
+     from_checkpoint: ''
++    from_checkpoint_regex: ''
+     episode_timeout: 180
+     actor_addr: 'localhost:{auto}'
+     replay_addr: 'localhost:{auto}'
+@@ -88,7 +92,7 @@ defaults:
+     ac_grads: False
+     dyn:
+       typ: rssm
+-      rssm: {deter: 8192, hidden: 1024, stoch: 32, classes: 64, act: silu, norm: rms, unimix: 0.01, outscale: 1.0, winit: trunc_normal_in, imglayers: 2, obslayers: 1, dynlayers: 1, absolute: False, blocks: 8, free_nats: 1.0}
++      rssm: {deter: 8192, hidden: 1024, stoch: 32, classes: 64, act: silu, norm: rms, unimix: 0.01, outscale: 1.0, winit: trunc_normal_in, imglayers: 2, obslayers: 1, dynlayers: 1, absolute: False, blocks: 8, free_nats: 1.0, unroll: False}
+     enc:
+       typ: simple
+       simple: {depth: 64, mults: [2, 3, 4, 4], layers: 3, units: 1024, act: silu, norm: rms, winit: trunc_normal_in, symlog: True, outer: False, kernel: 5, strided: False}
+@@ -116,6 +120,7 @@ defaults:
+     repval_grad: True
+     report: True
+     report_gradnorms: False
++    q: {precision: '', freeze_wo: False, frozen: False, trace_cap: True, target: True, target_rate: 0.02, retnorm: False, ret_limit: 1.0, ret_rate: 0.01, ret_lo: 5.0, ret_hi: 95.0, tau_rel: 0.0, tau_rate: 0.01, wo_std: 0.0, trace_norm: False, env_mean: True, debug_outs: False, xnorm: True, gscale: 1.0, seed: 0, tau: 0.05, gamma: 0.99, lam: 0.9, beta: 0.3, eta: 0.02, eps: 1e-6, imag_updates: True, imag_length: 15, imag_beta: 0.05, imag_eta: 0.05}
+ 
+ size1m: &size1m
+   .*\.rssm: {deter: 512, hidden: 64, classes: 4}
+diff --git a/dreamerv3/main.py b/dreamerv3/main.py
+index 10476e8..1a12715 100644
+--- a/dreamerv3/main.py
++++ b/dreamerv3/main.py
+@@ -44,6 +44,7 @@ def main(argv=None):
+   def init():
+     elements.timer.global_timer.enabled = config.logger.timer
+ 
++  init()
+   portal.setup(
+       errfile=config.errfile and logdir / 'error',
+       clientkw=dict(logging_color='cyan'),
+@@ -135,6 +136,23 @@ def make_agent(config):
+     return embodied.RandomAgent(obs_space, act_space)
+   cpdir = elements.Path(config.logdir)
+   cpdir = cpdir.parent if config.replicas > 1 else cpdir
++  if config.agent_type == 'q':
++    from .qagent import QAgent
++    from .qwrapper import QAgentWrapper
++    agent = QAgent(obs_space, act_space, elements.Config(
++        **config.agent,
++        logdir=config.logdir,
++        seed=config.seed,
++        jax=config.jax,
++        batch_size=config.batch_size,
++        batch_length=config.batch_length,
++        replay_context=config.replay_context,
++        report_length=config.report_length,
++        replica=config.replica,
++        replicas=config.replicas,
++    ))
++    return QAgentWrapper(agent, config.logdir)
++  assert config.agent_type == 'dreamer', config.agent_type
+   return Agent(obs_space, act_space, elements.Config(
+       **config.agent,
+       logdir=config.logdir,
+@@ -229,6 +247,7 @@ def make_env(config, index, **overrides):
+       'langroom': 'embodied.envs.langroom:LangRoom',
+       'procgen': 'embodied.envs.procgen:ProcGen',
+       'bsuite': 'embodied.envs.bsuite:BSuite',
++      'navix': 'embodied.envs.navix:Navix',
+       'memmaze': lambda task, **kw: from_gym.FromGym(
+           f'MemoryMaze-{task}-v0', **kw),
+   }[suite]
+diff --git a/embodied/jax/agent.py b/embodied/jax/agent.py
+index ba90423..74b7893 100644
+--- a/embodied/jax/agent.py
++++ b/embodied/jax/agent.py
+@@ -172,13 +172,13 @@ class Agent(embodied.Agent):
+ 
+     self._split = jax.jit(
+         lambda xs: jax.tree.map(lambda x: list(x), xs),
+-        internal.local_sharding(self.policy_sharded),
+-        internal.local_sharding(self.policy_mirrored))
++        in_shardings=internal.local_sharding(self.policy_sharded),
++        out_shardings=internal.local_sharding(self.policy_mirrored))
+     self._stack = jax.jit(
+         lambda xs: jax.tree.map(
+             jnp.stack, xs, is_leaf=lambda x: isinstance(x, list)),
+-        internal.local_sharding(self.policy_mirrored),
+-        internal.local_sharding(self.policy_sharded))
++        in_shardings=internal.local_sharding(self.policy_mirrored),
++        out_shardings=internal.local_sharding(self.policy_sharded))
+ 
+     self._ckpt_groups = internal.grouped_ckpt_fns(
+         self.params, self.jaxcfg.ckpt_chunksize)
+diff --git a/embodied/jax/internal.py b/embodied/jax/internal.py
+index ae9047b..e886650 100644
+--- a/embodied/jax/internal.py
++++ b/embodied/jax/internal.py
+@@ -277,9 +277,13 @@ def ckpt_fn(params, compile=True):
+   keys = params.keys()
+   original = {k: params[k].sharding for k in keys}
+   inspec = {k: struct(params[k], original[k]) for k in keys}
+-  gather_fn = jax.jit(lambda x: x, (original,), mirrored).lower(inspec)
++  gather_fn = jax.jit(
++      lambda x: x, in_shardings=(original,),
++      out_shardings=mirrored).lower(inspec)
+   inspec = {k: struct(params[k], mirrored) for k in keys}
+-  shard_fn = jax.jit(lambda x: x, (mirrored,), original).lower(inspec)
++  shard_fn = jax.jit(
++      lambda x: x, in_shardings=(mirrored,),
++      out_shardings=original).lower(inspec)
+   if compile:
+     gather_fn = gather_fn.compile()
+     shard_fn = shard_fn.compile()
+diff --git a/embodied/jax/transform.py b/embodied/jax/transform.py
+index bc1b27e..17b4a6f 100644
+--- a/embodied/jax/transform.py
++++ b/embodied/jax/transform.py
+@@ -53,7 +53,9 @@ def init(
+   if print_partition:
+     print_grouping(grouping)
+ 
+-  fn = jax.jit(fn, arg_shardings, params_sharding, static_argnums, None)
++  fn = jax.jit(
++      fn, in_shardings=arg_shardings, out_shardings=params_sharding,
++      static_argnums=static_argnums)
+   params = fn(*dummy_inputs)
+ 
+   return params, params_sharding
+@@ -96,13 +98,14 @@ def apply(
+         outs[i] = jax.tree.map(lambda x: x[None], outs[i])
+       return tuple(outs)
+ 
+-    from jax.experimental.shard_map import shard_map
++    from jax import shard_map
+     ispecs = list(jax.tree.map(lambda s: s.spec, in_shardings))
+     for i in sorted(static_argnums):
+       ispecs.insert(i, None)
+     ispecs = tuple(ispecs)
+     ospecs = jax.tree.map(lambda s: s.spec, out_shardings)
+-    fn = shard_map(fn, mesh, ispecs, ospecs, check_rep=False)
++    fn = shard_map(
++        fn, mesh=mesh, in_specs=ispecs, out_specs=ospecs, check_vma=False)
+ 
+     def fn(*args, inner=fn):
+       outs = list(inner(*args))
+@@ -129,7 +132,9 @@ def apply(
+         nn.LAYER_CALLBACK = old
+       return outs
+ 
+-  fn = jax.jit(fn, in_shardings, out_shardings, static_argnums, None, donate)
++  fn = jax.jit(
++      fn, in_shardings=in_shardings, out_shardings=out_shardings,
++      static_argnums=static_argnums, donate_argnums=donate)
+ 
+   return fn
+ 
+diff --git a/embodied/run/train.py b/embodied/run/train.py
+index fc791ec..b8f54c1 100644
+--- a/embodied/run/train.py
++++ b/embodied/run/train.py
+@@ -26,6 +26,11 @@ def train(make_agent, make_replay, make_env, make_stream, make_logger, args):
+   should_log = embodied.LocalClock(args.log_every)
+   should_report = embodied.LocalClock(args.report_every)
+   should_save = embodied.LocalClock(args.save_every)
++  # Step-based checkpoints and progress summaries (RL-TDP addition).
++  save_steps = int(args.get('save_steps', 0) or 0)
++  saved_bucket = [0]
++  window = collections.defaultdict(float)
++  last_train = {}
+ 
+   @elements.timer.section('logfn')
+   def logfn(tran, worker):
+@@ -45,6 +50,10 @@ def train(make_agent, make_replay, make_env, make_stream, make_logger, args):
+         episode.add(key + '/sum', value, agg='sum')
+     if tran['is_last']:
+       result = episode.result()
++      window['episodes'] += 1
++      window['successes'] += float(result['score'] > 0)
++      window['score_sum'] += float(result['score'])
++      window['length_sum'] += float(result['length'])
+       logger.add({
+           'score': result.pop('score'),
+           'length': result.pop('length'),
+@@ -78,6 +87,10 @@ def train(make_agent, make_replay, make_env, make_stream, make_logger, args):
+       if 'replay' in outs:
+         replay.update(outs['replay'])
+       train_agg.add(mets, prefix='train')
++      for k, v in mets.items():
++        v = np.asarray(v)
++        if v.ndim == 0 and np.issubdtype(v.dtype, np.number):
++          last_train.setdefault(k, []).append(float(v))
+   driver.on_step(trainfn)
+ 
+   cp = elements.Checkpoint(logdir / 'ckpt')
+@@ -116,4 +129,33 @@ def train(make_agent, make_replay, make_env, make_stream, make_logger, args):
+     if should_save(step):
+       cp.save()
+ 
++    if save_steps and int(step) // save_steps > saved_bucket[0]:
++      saved_bucket[0] = int(step) // save_steps
++      cp.save()
++      # Keep a copy of every step checkpoint (elements keeps only the latest).
++      import shutil
++      latest = (logdir / 'ckpt' / 'latest').read_text().strip()
++      src = str(logdir / 'ckpt' / latest)
++      dst = str(logdir / 'ckpt_steps' / f'{int(step):08d}')
++      shutil.copytree(src, dst, ignore=shutil.ignore_patterns('replay*'))
++      n = max(window['episodes'], 1)
++      rec = {
++          'step': int(step),
++          'episodes': int(window['episodes']),
++          'successes': int(window['successes']),
++          'success_frac': window['successes'] / n,
++          'mean_score': window['score_sum'] / n,
++          'mean_length': window['length_sum'] / n,
++      }
++      # Mean over all train steps in this window.
++      for k, v in last_train.items():
++        rec['train/' + k] = float(np.mean(v))
++      last_train.clear()
++      with (logdir / 'progress.jsonl').open('a') as f:
++        import json
++        f.write(json.dumps(rec) + '\n')
++      print(f'[progress] {rec["step"]}: {rec["successes"]}/{rec["episodes"]} '
++            f'successes, checkpoint saved')
++      window.clear()
++
+   logger.close()
