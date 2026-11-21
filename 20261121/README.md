@@ -9,6 +9,7 @@
 - `logs/*.log`: 실행 묶음 스크립트의 시작·종료 기록
 - `scripts/`: 새 과제 단계 실행 묶음
 - `claude_memory/`: Claude Code 메모리 사본
+- `synapse_literature/README.md`: 시냅스 가소성으로 파국적 망각을 막는 방법 문헌 조사 (저녁, Claude 클라우드 세션)
 
 ## 새 인스턴스에서
 
